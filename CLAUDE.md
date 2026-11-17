@@ -9,7 +9,7 @@ Diese Entscheidungen sind getroffen und werden nicht ohne Rückfrage geändert:
 
 * Ziel ESP32 (klassisch), ESP-IDF ≥ 5.2.5, kein PSRAM vorausgesetzt.
 * ASiC-S nach ETSI EN 319 162-1. Signatur in `META-INF/signature.p7s`. Alle ZIP-Einträge STORE, eigener ZIP-Writer, keine Kompressionsbibliothek.
-* CAdES-B-B detached, SHA-256 / ECDSA P-256. CAdES-B-T (TSA) ist als spätere Erweiterung vorgesehen.
+* CAdES-B-B detached, SHA-256 / ECDSA P-256. CAdES-B-T (RFC-3161-Zeitstempel) ist umgesetzt: TSA-Modus zur Laufzeit OFF/PREFERRED/REQUIRED, Transport `esp_http_client`, TSA-CA in die Firmware eingebettet.
 * Ausgabe streamend über einen Writer-Callback.
 * Ohne gültige Uhrzeit oder mit ungültigem Gerätezertifikat wird nicht signiert.
 * Ein einmal erzeugter Geräteschlüssel wird nie neu gesetzt oder ersetzt.

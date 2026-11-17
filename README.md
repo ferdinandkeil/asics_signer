@@ -2,8 +2,8 @@
 
 `asics_signer` is a self-contained ESP-IDF component that signs a single payload file (for example a CSV
 record) held in RAM and emits a standards-compliant **ASiC-S container** (ETSI EN 319 162-1) with a
-detached **CAdES-B-B signature** (ETSI EN 319 122-1, SHA-256 / ECDSA P-256). The payload is stored
-bit-for-bit unchanged.
+detached **CAdES-B-B signature** (ETSI EN 319 122-1, SHA-256 / ECDSA P-256), optionally extended to
+**CAdES-B-T** with an RFC 3161 time stamp. The payload is stored bit-for-bit unchanged.
 
 * **Target:** ESP32 (classic), ESP-IDF ≥ 5.2.5 (mbedTLS 3.x), no PSRAM required
 * **Dependencies:** ESP-IDF only (`mbedtls`, `nvs_flash`, `esp_rom`, `console`), no third-party libraries
@@ -19,6 +19,7 @@ bit-for-bit unchanged.
 - [Architecture](#architecture)
 - [Requirements and integration](#requirements-and-integration)
 - [Usage](#usage)
+- [Time stamps (CAdES-B-T)](#time-stamps-cades-b-t)
 - [Provisioning](#provisioning)
 - [Configuration (Kconfig)](#configuration-kconfig)
 - [Production security](#production-security)
@@ -35,7 +36,7 @@ The container is a ZIP archive with exactly three entries, in this order:
 |---|-------|--------|---------|
 | 1 | `mimetype` | STORE | `application/vnd.etsi.asic-s+zip` with no extra field, so the content starts at byte offset 38 (magic-byte detection) |
 | 2 | `<payload_name>` | STORE | the payload, unchanged |
-| 3 | `META-INF/signature.p7s` | STORE | DER-encoded CMS `SignedData` (CAdES-B-B, detached) |
+| 3 | `META-INF/signature.p7s` | STORE | DER-encoded CMS `SignedData` (CAdES-B-B, or B-T with a time stamp; detached) |
 
 All entries are uncompressed. Sizes and CRC32 are known before each local header is written, so
 no data descriptors and no ZIP64 records are used. CRC32 comes from the ROM (`esp_rom_crc32_le`).
@@ -56,8 +57,9 @@ The DOS timestamp of all entries equals the signing time. It can only represent 
   * `signing-certificate-v2` (`ESSCertIDv2`, SHA-256, including `issuerSerial`)
 
 The signature value is computed over the signed attributes re-tagged as `SET` (`0x31`), as
-RFC 5652 requires. A hook for unsigned attributes is in place for a future CAdES-B-T
-(`signature-time-stamp`).
+RFC 5652 requires. With a time stamp (see [Time stamps](#time-stamps-cades-b-t)) the `SignerInfo`
+additionally carries the unsigned attribute `signature-time-stamp` (OID 1.2.840.113549.1.9.16.2.14),
+which makes the signature CAdES-B-T.
 
 ## Architecture
 
@@ -108,6 +110,9 @@ everything that persists data goes through a small key/value store interface.
 | `src/der_writer.c` | Thin DER helpers on top of `mbedtls/asn1write.h` (DER `SET OF` sorting, time encoding) |
 | `src/csr_builder.c` | Encodes the PKCS#10 CSR itself and signs it through the HAL. `mbedtls_x509write_csr` is not used because it needs the private key, which a secure element would never release |
 | `src/cert_store.c` | Stores the device certificate and CA chain as one atomic blob; checks the key match, chain signatures, CA flags and validity periods |
+| `src/tsa.c` | Time-stamp integration: nonce, request, transport, verification and embedding as unsigned attribute; TSA mode handling |
+| `src/tsa_req.c`, `src/tsa_resp.c`, `src/tsa_verify.c`, `src/der_reader.h` | RFC 3161 request encoder, response / `TSTInfo` parser with content checks, token signature and TSA certificate checks, bounded DER reader |
+| `src/tsa_transport.h`, `src/tsa_http.c`, `src/tsa_host.c` | Internal transport seam (not public API): `esp_http_client` on the target, `openssl ts -reply` with test hooks on the host |
 | `src/time_source.c` | Clock validity: `time()` must be ≥ `CONFIG_ASICS_MIN_TIME` (the build time by default) |
 | `src/pem_util.c` | PEM ↔ DER conversion for the CSR, the import and the console |
 | `src/backend/key_backend.h`, `key_backend.c` | Key HAL: `init`, `has_key`, `generate`, `get_public`, `sign_digest`, plus the shared `asics_key_sign_adapter` used by the CAdES and CSR builders |
@@ -123,8 +128,10 @@ everything that persists data goes through a small key/value store interface.
 2. **Hash.** It computes the SHA-256 of the payload.
 3. **Signed attributes.** `cades_builder` encodes them, hashes them as a `SET` and asks the key backend
    for an ECDSA signature over that hash (`sign_digest`).
-4. **CMS.** The `SignedData` is assembled in a fixed heap buffer (`CONFIG_ASICS_CMS_BUF_SIZE`).
-5. **Container.** `asics_container` streams `mimetype`, the payload and `signature.p7s`, followed by the
+4. **Time stamp (optional).** Depending on the TSA mode the unsigned-attribute hook requests, verifies and
+   embeds an RFC 3161 token over the signature value.
+5. **CMS.** The `SignedData` is assembled in a fixed heap buffer (`CONFIG_ASICS_CMS_BUF_SIZE`).
+6. **Container.** `asics_container` streams `mimetype`, the payload and `signature.p7s`, followed by the
    central directory and the end record, through the caller's callback in chunks of at most
    `CONFIG_ASICS_WRITE_CHUNK` bytes. A callback error aborts generation immediately and is returned to
    the caller.
@@ -197,6 +204,74 @@ The API is not reentrant; serialise calls (including against the console).
 
 A complete example is in [`examples/basic_sign`](examples/basic_sign) (`idf.py set-target esp32 build`).
 
+## Time stamps (CAdES-B-T)
+
+`asics_sign_ex()` can embed an RFC 3161 time stamp as the unsigned attribute `signature-time-stamp`,
+which turns the signature into **CAdES-B-T**. The mode is chosen at run time:
+
+```c
+typedef enum { ASICS_TSA_OFF, ASICS_TSA_PREFERRED, ASICS_TSA_REQUIRED } asics_tsa_mode_t;
+
+asics_set_tsa_mode(ASICS_TSA_PREFERRED);       /* RAM only, not persisted */
+
+asics_sign_result_t res;
+esp_err_t err = asics_sign_ex("record.csv", csv, csv_len, write_cb, ctx, &res);
+/* res.level: ASICS_LEVEL_B_B or ASICS_LEVEL_B_T; res.tsa_err: reason if no time stamp; res.tsa_gen_time */
+```
+
+| Mode | Behaviour |
+|------|-----------|
+| `ASICS_TSA_OFF` | plain CAdES-B-B, byte-for-byte the previous output; the TSA is never contacted |
+| `ASICS_TSA_PREFERRED` | try the time stamp; on any TSA error produce a B-B container, return `ESP_OK`, `res.level = ASICS_LEVEL_B_B`, `res.tsa_err` = reason |
+| `ASICS_TSA_REQUIRED` | on any TSA error produce **no** container and make **no** write-callback call; the error code is returned |
+
+The initial mode comes from Kconfig (default `OFF`), or from `asics_config_t.tsa_mode` when
+`asics_signer_init()` gets a non-NULL config (a zero-initialised config therefore selects `OFF`).
+`asics_sign()` is unchanged and equals `asics_sign_ex(..., NULL)`. Error codes:
+`ASICS_ERR_TSA_UNAVAILABLE` (network, timeout, HTTP error, no URL or no TSA CA configured),
+`ASICS_ERR_TSA_REJECTED` (PKIStatus is neither granted nor grantedWithMods) and `ASICS_ERR_TSA_INVALID`
+(the response failed a check below, or exceeds `CONFIG_ASICS_TSA_MAX_RESP`).
+
+**Request.** `TimeStampReq` v1 with `messageImprint` = SHA-256 over the octets of `SignerInfo.signature`,
+a random 64-bit nonce (`esp_fill_random`), `certReq = TRUE` and an optional `reqPolicy` OID. It is sent
+with `esp_http_client` as `POST` (`Content-Type: application/timestamp-query`) to `CONFIG_ASICS_TSA_URL`;
+for `https://` URLs the mbedTLS certificate bundle is used if enabled. There is no public transport
+callback. Redirects are not followed.
+
+**Verification on the device** (all of it, before anything is embedded):
+
+* PKIStatus `granted` or `grantedWithMods`; the token is a `SignedData` with `eContentType` `id-ct-TSTInfo`
+  and exactly one `SignerInfo`
+* `TSTInfo`: version 1, `messageImprint` (SHA-256 and value) and nonce match the request, `genTime` is within
+  `CONFIG_ASICS_TSA_GENTIME_TOLERANCE_S` (default 300 s) of the device clock
+* signed attributes: `content-type` = `id-ct-TSTInfo`, `message-digest` over the `eContent`, and an ESS
+  `signing-certificate` or `signing-certificate-v2` whose hash matches the TSA certificate in the token
+* the signature over the DER signed attributes (ECDSA or RSA PKCS#1 v1.5; digest SHA-256, -384 or -512)
+* the TSA certificate carries a **critical** extended key usage `timeStamping` and no other usage, is signed by
+  the embedded TSA CA (which needs the CA flag) and is valid at `genTime`
+
+**Configuration.** Set `CONFIG_ASICS_TSA_URL` and `CONFIG_ASICS_TSA_CA_PEM`, the path of exactly one trusted
+TSA CA as a PEM file (relative paths are relative to the project directory); it is embedded in the firmware.
+Without a TSA CA or URL no time stamp can be produced: `PREFERRED` falls back to B-B and `REQUIRED` fails with
+`ASICS_ERR_TSA_UNAVAILABLE`. The application provides the network (for example Wi-Fi) and a clock accurate to
+within the tolerance; the call blocks until the TSA answers or `CONFIG_ASICS_TSA_TIMEOUT_MS` expires.
+
+**Buffers and memory.** With a TSA URL configured, `ASICS_CMS_BUF_SIZE` defaults to 9216 and the certificate
+import runs its probe build with a token of `ASICS_TSA_MAX_RESP` bytes, so a chain that would not leave room
+for the token is rejected at import time. While time-stamping, a call additionally allocates the response
+buffer (`ASICS_TSA_MAX_RESP`, default 4096 bytes) and verification uses short-lived heap for the parsed TSA
+and CA certificates (about 1 KB). An estimate for the default configuration with a TSA is about 25 KB of
+heap (certificate blob 4 KB, CMS buffer 9 KB, response 4 KB, attribute scratch 1.5 KB, certificates and
+mbedTLS state) plus the HTTP client; an `https://` TSA adds the TLS session (roughly 40 KB more). The
+hook runs on the caller's stack (about 2 KB on top of the existing use); keep at least 8 KB for the signing
+task. These numbers are estimates: the time-stamp path has not been run on hardware yet.
+
+The example `examples/basic_sign` has the console commands `wifi <ssid> <password>`
+(`WIFI_STORAGE_RAM`, nothing is stored), `tsa-mode off|preferred|required` and `sign`, which prints the
+level, the TSA error and the `genTime`. Its `sdkconfig.defaults` leave the TSA URL and CA empty; set
+`CONFIG_ASICS_TSA_URL="http://<host>/api/v1/timestamp"` and `CONFIG_ASICS_TSA_CA_PEM="tsa_ca.pem"` (a file next
+to the example's `CMakeLists.txt`), for example through `idf.py menuconfig`.
+
 ## Provisioning
 
 At the manufacturing station, over the UART console (`CONFIG_ASICS_ENABLE_CONSOLE`, registered by the
@@ -237,12 +312,19 @@ Menu **ASiC-S Signer**:
 | `ASICS_MIN_TIME` | 0 | Minimum valid Unix time (0 = time of the CMake run) |
 | `ASICS_CERT_MAX_LEN` | 1024 | Maximum DER size of one certificate |
 | `ASICS_MAX_CHAIN` | 4 | Maximum certificates in total (device + CAs), range 2..8 |
-| `ASICS_CMS_BUF_SIZE` | 5120 | CMS buffer; must hold the CMS (all certificates + attributes + signature); import verifies this with a probe build |
+| `ASICS_CMS_BUF_SIZE` | 5120 (9216 with a TSA URL) | CMS buffer; must hold the CMS (all certificates + attributes + signature); import verifies this with a probe build |
 | `ASICS_ATTRS_BUF_SIZE`, `ASICS_CSR_BUF_SIZE` | 768, 768 | Work buffers |
 | `ASICS_PAYLOAD_NAME_MAX` | 100 | Maximum payload file name length |
 | `ASICS_WRITE_CHUNK` | 4096 | Maximum bytes per write-callback call |
 | `ASICS_SUBJECT_ORG`, `ASICS_SUBJECT_COUNTRY` | empty | CSR subject `O` / `C` (omitted if empty) |
 | `ASICS_ENABLE_CONSOLE` | y | Build the `asics` console command |
+| `ASICS_TSA_URL` | empty | TSA endpoint (HTTP/HTTPS); empty = no time stamps possible |
+| `ASICS_TSA_DEFAULT_OFF` / `_PREFERRED` / `_REQUIRED` | OFF | Initial TSA mode (changeable at run time) |
+| `ASICS_TSA_CA_PEM` | empty | PEM file of the single trusted TSA CA, embedded in the firmware |
+| `ASICS_TSA_POLICY_OID` | empty | `reqPolicy` OID in the request (omitted if empty) |
+| `ASICS_TSA_TIMEOUT_MS` | 5000 | Timeout of the TSA request |
+| `ASICS_TSA_MAX_RESP` | 4096 | Maximum TSA response / token size (heap) |
+| `ASICS_TSA_GENTIME_TOLERANCE_S` | 300 | Allowed difference between `genTime` and the device clock |
 
 ## Production security
 
@@ -268,23 +350,35 @@ test/host/run_tests.sh [work-dir]
 
 The host test suite builds a Unity test app for the ESP-IDF `linux` target and runs these steps:
 
-1. It generates a test PKI (`test/gen_test_pki.sh`): a single issuing CA and a chain
-   root → intermediate → issuing → device.
+1. It generates a test PKI (`test/gen_test_pki.sh`): a single issuing CA, a chain
+   root → intermediate → issuing → device, and a test TSA (root CAs, an EC TSA certificate with critical
+   `timeStamping` EKU, variants without EKU and from a foreign CA, an RSA TSA certificate).
 2. It runs the unit tests: ZIP layout and offsets, CAdES determinism and attribute ordering, CSR,
    import checks, chain lengths, time and validity checks.
 3. It checks the generated containers with:
    * `unzip -t` and `zipinfo`
    * `openssl cms -verify` (also with `-cades`), plus a tampered-payload test that must be rejected
-   * `openssl req -verify` for the CSR
-4. If Docker is available, it validates the containers with **EU DSS**. Otherwise this step is skipped
-   with a notice.
+   * `openssl req -verify` for the CSR, `openssl ts -query` / `-reply` / `-verify` for the time stamp
+     request and the test TSA answer
+4. If Docker is available, it validates the containers with **EU DSS**, including the CAdES-B-T
+   containers, which must be reported as `CAdES-BASELINE-T` with `TOTAL_PASSED`. Otherwise this step is
+   skipped with a notice.
+
+The time stamp tests use `openssl ts -reply` as the test TSA (the host transport in `src/tsa_host.c`, with a test
+hook) and cover both modes plus every failure class in `PREFERRED` and `REQUIRED`: transport error,
+rejected status, wrong imprint, wrong nonce, tampered TSA signature, tampered `TSTInfo`, TSA certificate from a
+foreign CA or without EKU, `genTime` outside the tolerance, truncated or oversized response, missing token and
+missing TSA CA. `ASICS_TSA_CHECK=1 test/host/run_tests.sh` additionally runs
+[`tools/tsa/check.sh`](tools/tsa), which checks a request of the component against the
+[sigstore timestamp-authority](https://github.com/sigstore/timestamp-authority) in Docker (needs a one-time
+image pull).
 
 On the host, the RAM store replaces NVS and the random source is **not** cryptographically secure,
 which is acceptable for tests only.
 
-`tools/verify_dss.sh <container.asics> <trust-anchor.pem>` validates a container offline
+`tools/verify_dss.sh <container.asics> <trust-anchor.pem> [<more-anchors.pem> ...]` (a CAdES-B-T container needs the device CA and the TSA root) validates a container offline
 (`--network none`) with the `asics-dss` Docker image built from [`tools/dss`](tools/dss) (DSS 6.5.1). Exit
-code 0 means `TOTAL_PASSED`. The bundled offline policy lowers only the revocation-data checks to
+code 0 means `TOTAL_PASSED`. The bundled offline policy lowers only the revocation-data checks (including those of the TSA signer certificate) to
 warnings, because CAdES-B-B carries no revocation data and none is fetched offline. The
 `signing-certificate-v2` checks are raised to FAIL. See [`tools/dss/README.md`](tools/dss/README.md)
 (in German) for details.
@@ -316,7 +410,10 @@ Measured with a 36-byte payload:
 * Secure element / TPM 2.0 backend: interface only (stub)
 * No compression; the `zip_writer` interface allows adding it later (for example uzlib)
 * No ZIP64 (payload < 4 GiB)
-* CAdES-B-T (RFC 3161 time stamp from a TSA): planned, hook for unsigned attributes in place
+* CAdES-B-T: one embedded TSA CA, HTTP(S) transport only (no custom transport), no TSA certificate
+  revocation checking, no long-term formats (B-LT, B-LTA); the HTTP transport has been compiled for the
+  target but not run on hardware, and `https://` TSAs additionally depend on a certificate bundle in the
+  application
 * Not checked on import: `pathLen` constraints and revocation status
 * Production security features (Secure Boot v2, flash encryption, NVS encryption) have not yet been
   tested together with the component on hardware
