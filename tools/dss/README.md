@@ -36,14 +36,18 @@ docker run --rm --network none --user $(id -u):$(id -g) -v <dir>:/data asics-dss
 ## Policy `policy/asics-offline-constraint.xml`
 
 Kopie der DSS-6.5.1-Default-Policy (`policy/constraint.xml` aus `dss-policy-jaxb`, unverändert als
-`default-constraint.xml` mitgeführt). Alle Änderungen sind mit `<!-- ASICS-OFFLINE: war ... -->` markiert. Revocation (zwei Änderungen) in
-`SignatureConstraints/BasicSignatureConstraints/SigningCertificate` (Diff: `diff policy/default-constraint.xml policy/asics-offline-constraint.xml`):
+`default-constraint.xml` mitgeführt). Alle Änderungen sind mit `<!-- ASICS-OFFLINE: war ... -->` markiert. Revocation (je zwei Änderungen) in
+`SignatureConstraints/BasicSignatureConstraints/SigningCertificate` und `.../CACertificate` (Diff: `diff policy/default-constraint.xml policy/asics-offline-constraint.xml`):
 
 
 | Constraint | Default | hier | Grund |
 |---|---|---|---|
 | `RevocationDataAvailable` | FAIL | WARN | CAdES-B-B enthält keine Sperrinformationen, offline gibt es keine; Default liefert sonst INDETERMINATE/CERTIFICATE_CHAIN_GENERAL_FAILURE |
 | `AcceptableRevocationDataFound` | FAIL | WARN | s. o. |
+
+Die beiden Constraints sind im Abschnitt `CACertificate` ebenfalls auf WARN gesetzt: Bei Ketten mit
+Zwischen-CAs (Gerät → Issuing → Intermediate → Root) fehlen offline auch für die CA-Zertifikate die
+Sperrdaten; sonst INDETERMINATE/CERTIFICATE_CHAIN_GENERAL_FAILURE.
 
 Zusätzlich auf **FAIL** gesetzt (vorher WARN) in `SignatureConstraints/SignedAttributes`, damit die
 signing-certificate-v2-Bindung (Signatur <-> Gerätezertifikat) erzwungen wird:
@@ -61,7 +65,7 @@ signing-certificate-v2-Bindung (Signatur <-> Gerätezertifikat) erzwungen wird:
 Counter-Signature- und Timestamp-Abschnitt wurden nicht vorgenommen (für B-B ohne Belang).
 
 Bewusst unverändert: `RevocationFreshness` (Default bereits IGNORE), `NotRevoked`/`NotOnHold` (FAIL, greifen,
-sobald Sperrdaten vorliegen), CA-Zertifikat-Constraints (der Test-CA-Trust-Anchor braucht sie nicht; geprüft),
+sobald Sperrdaten vorliegen), die übrigen CA-Zertifikat-Constraints (u. a. `NotExpired`, CA-Flag, Signatur),
 sowie alle Signatur-/Format-/Kryptoprüfungen (`SignatureIntact`, `ReferenceDataIntact`, `ReferenceDataExistence`,
 `ProspectiveCertificateChain`, `Cryptographic`/Algorithmen, `NotExpired` usw.).
 
