@@ -201,6 +201,19 @@ static void test_tsa_generalized_time(void)
     TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"2026011512000aZ", 15, &t));
     TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20261315120000Z", 15, &t));
     TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.Z", 16, &t));
+    /* Tag gegen Monat, Schaltjahre */
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260231120000Z", 15, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260431120000Z", 15, &t));
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"20240229120000Z", 15, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20230229120000Z", 15, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"19000229120000Z", 15, &t));   /* kein Schaltjahr */
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"20000229120000Z", 15, &t));    /* Schaltjahr */
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120060Z", 15, &t));   /* Sekunde 60 */
+    /* Bruchteil nach DER */
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.5Z", 17, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.50Z", 18, &t));  /* Nullen am Ende */
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000,5Z", 17, &t));   /* Komma statt Punkt */
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.0Z", 17, &t));  /* nur Null */
 }
 
 /* ---- Token-Pruefung (Signatur, ESS, TSA-Zertifikat) ---- */

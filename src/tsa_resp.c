@@ -118,8 +118,18 @@ bool tsa_parse_generalized_time(const uint8_t *s, size_t len, time_t *out)
                 return false;
             }
         }
+        if (s[len - 2] == '0') { /* DER: keine abschliessenden Nullen im Bruchteil */
+            return false;
+        }
     }
-    if (vals[1] < 1 || vals[1] > 12 || vals[2] < 1 || vals[2] > 31 || vals[3] > 23 || vals[4] > 59 || vals[5] > 60) {
+    if (vals[1] < 1 || vals[1] > 12 || vals[3] > 23 || vals[4] > 59 || vals[5] > 59) {
+        return false;
+    }
+    static const int mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int y = vals[0];
+    bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    int dim = mdays[vals[1] - 1] + (vals[1] == 2 && leap ? 1 : 0);
+    if (vals[2] < 1 || vals[2] > dim) { /* Tag gegen Monat (inkl. Schaltjahre) */
         return false;
     }
     int64_t days = days_from_civil(vals[0], (unsigned)vals[1], (unsigned)vals[2]);
