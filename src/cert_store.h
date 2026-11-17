@@ -40,6 +40,6 @@ esp_err_t asics_cert_store_load(uint8_t *buf, size_t buf_size, size_t *count,
 /** true, wenn ein plausibler Zertifikatsblob vorhanden ist. */
 bool asics_cert_store_present(void);
 
-/** Prueft notBefore/notAfter eines DER-Zertifikats gegen now.
+/** Prueft notBefore/notAfter eines (beliebigen) DER-Zertifikats gegen now.
  *  ESP_OK, ASICS_ERR_CERT_PARSE oder ASICS_ERR_SIGNER_CERT_VALIDITY (mit Log-Meldung). */
 esp_err_t asics_cert_check_validity(const uint8_t *der, size_t len, time_t now);

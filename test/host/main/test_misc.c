@@ -205,6 +205,33 @@ static void test_import_probe_size(void)
     TEST_ASSERT_TRUE(calls > 0);
 }
 
+/* Auch die CA-Zertifikate der Kette werden beim Signieren geprueft (nicht nur das Geraetezertifikat) */
+static void test_sign_chain_validity(void)
+{
+    int calls = 0;
+    /* abgelaufene CA: Import zu TEST_TIME ok, Signieren nach Ablauf (2026-07-01) verweigert */
+    setup();
+    const char *sc[] = {"shortca.pem", "ca.pem"};
+    TEST_ASSERT_EQUAL(ESP_OK, test_import_chain("dev_shortca.pem", sc, 2));
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+    int ok_calls = calls;
+    g_now = (time_t)1782864000LL;
+    TEST_ASSERT_EQUAL(ASICS_ERR_SIGNER_CERT_VALIDITY, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+    TEST_ASSERT_EQUAL(ok_calls, calls);
+
+    /* noch nicht gueltige CA: Import ohne Uhr (keine Zeitpruefung) ok, Signieren vor 2026-03-01 verweigert */
+    setup();
+    g_now = asics_time_min() - 5;
+    const char *fc[] = {"futureca.pem", "ca.pem"};
+    TEST_ASSERT_EQUAL(ESP_OK, test_import_chain("dev_futureca.pem", fc, 2));
+    g_now = TEST_TIME;                                   /* 2026-01-15 */
+    calls = 0;
+    TEST_ASSERT_EQUAL(ASICS_ERR_SIGNER_CERT_VALIDITY, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+    TEST_ASSERT_EQUAL(0, calls);
+    g_now = (time_t)1775001600LL;                        /* 2026-04-01 */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+}
+
 static void test_sign_cert_validity(void)
 {
     setup();
@@ -326,6 +353,7 @@ void run_misc_tests(void)
     RUN_TEST(test_import_probe_size);
     RUN_TEST(test_import_pem_bundle);
     RUN_TEST(test_sign_cert_validity);
+    RUN_TEST(test_sign_chain_validity);
     RUN_TEST(test_pem);
     RUN_TEST(test_pem_encode_exact_buffer);
     RUN_TEST(test_import_pem_api);

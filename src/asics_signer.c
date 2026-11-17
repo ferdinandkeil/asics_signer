@@ -103,9 +103,12 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     if (err != ESP_OK) {
         goto out;
     }
-    err = asics_cert_check_validity(refs[0].der, refs[0].len, now);
-    if (err != ESP_OK) {
-        goto out; /* ASICS_ERR_SIGNER_CERT_VALIDITY: keine Signatur */
+    for (size_t i = 0; i < cnt; i++) { /* Geraetezertifikat und alle CA-Zertifikate der Kette */
+        err = asics_cert_check_validity(refs[i].der, refs[i].len, now);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Zertifikat %u der Kette zum Signierzeitpunkt nicht gueltig - keine Signatur", (unsigned)i);
+            goto out; /* ASICS_ERR_SIGNER_CERT_VALIDITY */
+        }
     }
     p.dev_cert = refs[0].der;
     p.dev_cert_len = refs[0].len;

@@ -33,8 +33,8 @@ extern "C" {
 /** Zertifikat ausserhalb seines Gueltigkeitszeitraums. */
 #define ASICS_ERR_CERT_VALIDITY     (ASICS_ERR_BASE + 4)
 
-/** Das Geraetezertifikat ist zum Signierzeitpunkt (aktuelle Zeit) nicht gueltig
- *  (noch nicht gueltig oder abgelaufen). asics_sign() verweigert die Signatur. */
+/** Ein Zertifikat der gespeicherten Kette (Geraet oder CA) ist zum Signierzeitpunkt (aktuelle
+ *  Zeit) nicht gueltig (noch nicht gueltig oder abgelaufen). asics_sign() verweigert die Signatur. */
 #define ASICS_ERR_SIGNER_CERT_VALIDITY (ASICS_ERR_BASE + 5)
 
 /** Ein DER-kodiertes Zertifikat (Zeiger + Laenge). */
@@ -79,12 +79,12 @@ asics_state_t asics_signer_get_state(void);
  * @param data         Nutzdaten (werden ohne Kopie gestreamt)
  * @param len          Laenge der Nutzdaten (< 4 GiB)
  *
- * Vor dem Signieren wird die Gueltigkeit (notBefore/notAfter) des Geraetezertifikats
- * gegen die aktuelle Zeit geprueft.
+ * Vor dem Signieren wird die Gueltigkeit (notBefore/notAfter) des Geraetezertifikats und
+ * aller CA-Zertifikate der Kette gegen die aktuelle Zeit geprueft.
  *
  * @return ESP_OK; ESP_ERR_INVALID_STATE (nicht provisioniert / Uhrzeit < Mindestzeit /
  *         Uhrzeit nach 2107, ausserhalb des ZIP-DOS-Zeitbereichs 1980..2107);
- *         ASICS_ERR_SIGNER_CERT_VALIDITY (Geraetezertifikat nicht gueltig);
+ *         ASICS_ERR_SIGNER_CERT_VALIDITY (ein Zertifikat der Kette nicht gueltig);
  *         ESP_ERR_INVALID_ARG; ESP_ERR_NO_MEM; oder der Fehler des Callbacks.
  */
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,

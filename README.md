@@ -101,7 +101,7 @@ everything that persists data goes through a small key/value store interface.
 |--------|----------------|
 | `include/asics_signer.h` | Public API: initialisation, provisioning state, `asics_sign()`, error codes |
 | `include/asics_provision.h` | Public provisioning API: serial number, key creation, public key, CSR (DER/PEM), chain import (DER/PEM), console registration |
-| `src/asics_signer.c` | Orchestrates signing: checks arguments, state and clock, loads the chain, checks the device certificate's validity, calls the CAdES builder and the container writer |
+| `src/asics_signer.c` | Orchestrates signing: checks arguments, state and clock, loads the chain, checks the validity of the device certificate and every CA certificate, calls the CAdES builder and the container writer |
 | `src/asics_provision.c` | Provisioning logic and the state machine (`NO_KEY → KEY_NO_CERT → PROVISIONED`) |
 | `src/asics_container.c`, `src/zip_writer.c` | Streams the ASiC-S ZIP (local headers, central directory, end record) through the write callback; the payload is passed through without copying |
 | `src/cades_builder.c` | Builds the CMS `SignedData` and signed attributes; signs through a callback that reaches the HAL |
@@ -188,7 +188,7 @@ Return values of `asics_sign()`:
 |------|---------|
 | `ESP_OK` | container written |
 | `ESP_ERR_INVALID_STATE` | not provisioned, clock below `CONFIG_ASICS_MIN_TIME`, or clock after 2107 |
-| `ASICS_ERR_SIGNER_CERT_VALIDITY` | device certificate not yet valid or expired |
+| `ASICS_ERR_SIGNER_CERT_VALIDITY` | the device certificate or a CA certificate of the stored chain is not yet valid or expired |
 | `ESP_ERR_INVALID_ARG` | invalid name, data or callback |
 | `ESP_ERR_NO_MEM` | buffer allocation failed |
 | any other | error returned by the write callback |
@@ -220,7 +220,7 @@ On import, the component checks:
 * every certificate is within its validity period
 
 If the clock is not yet valid, only the validity-period check is skipped (with a warning). It is then
-enforced at signing time. The API equivalents are `asics_provision_import_der()` and
+enforced at signing time for the device certificate and every CA certificate of the chain. The API equivalents are `asics_provision_import_der()` and
 `asics_provision_import_pem()`.
 
 ## Configuration (Kconfig)

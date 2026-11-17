@@ -274,7 +274,7 @@ esp_err_t asics_cert_check_validity(const uint8_t *der, size_t len, time_t now)
     mbedtls_x509_crt c;
     esp_err_t err = parse_one(&c, der, len);
     if (err == ESP_OK && !valid_at(&c, now)) {
-        ESP_LOGE(TAG, "Geraetezertifikat zum Signierzeitpunkt nicht gueltig");
+        ESP_LOGE(TAG, "Zertifikat zum angegebenen Zeitpunkt nicht gueltig");
         err = ASICS_ERR_SIGNER_CERT_VALIDITY;
     }
     mbedtls_x509_crt_free(&c);

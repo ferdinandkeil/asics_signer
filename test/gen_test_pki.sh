@@ -7,6 +7,7 @@
 #   Geraeteschluessel dev.key (fuer dev.pem und dev_chain.pem identisch)
 #   other.pem:      Zertifikat zu einem anderen Schluessel (Negativtest)
 #   longca.pem/medca.pem + dev_longdn.pem/dev_meddn.pem: CAs mit sehr langem bzw. mittlerem Issuer-DN (Puffertests)
+#   shortca.pem/futureca.pem + dev_shortca.pem/dev_futureca.pem: CA abgelaufen ab 2026-06 bzw. gueltig ab 2026-03
 #   leaf_ca.pem:    Zertifikat OHNE CA-Flag, ausgestellt von der Test-CA (Negativtest CA-Flag)
 # Aufruf: gen_test_pki.sh <ausgabeverzeichnis>
 set -euo pipefail
@@ -57,8 +58,9 @@ newdb() { mkdir "db_$1"; : > "db_$1/index.txt"; echo "$2" > "db_$1/serial"; }
 # issue <ausstellername> <ausstellerzert|""> <csr> <ext> <out> [policy]   (leer = selbstsigniert)
 issue() {
   local issuer="$1" issuer_pem="$2" csr="$3" ext="$4" outpem="$5" policy="${6:-pol}"
+  local start="${7:-20240101000000Z}" end="${8:-20440101000000Z}"
   local args=(-batch -config ca.cnf -policy "$policy" -keyfile "$issuer.key" -in "$csr" -extensions "$ext"
-              -startdate 20240101000000Z -enddate 20440101000000Z -notext -out "$outpem")
+              -startdate "$start" -enddate "$end" -notext -out "$outpem")
   if [ -z "$issuer_pem" ]; then args+=(-selfsign); else args+=(-cert "$issuer_pem"); fi
   CAN="$issuer" openssl ca "${args[@]}" 2>/dev/null
 }
@@ -95,4 +97,13 @@ mkkey medca; newdb medca 6000
 mkcsr medca "/C=DE/O=$(rep o 64)/OU=$(rep u 64)/CN=$(rep c 40)"
 issue ca ca.pem medca.csr ext_ca medca.pem pol_any
 issue medca medca.pem dev.csr ext_dev dev_meddn.pem
+
+# CAs mit abweichender Gueltigkeit (Pruefung der Kette beim Signieren):
+#   shortca: abgelaufen ab 2026-06-01, futureca: gueltig erst ab 2026-03-01
+mkkey shortca; newdb shortca 7000; mkcsr shortca "/C=DE/O=Test Org/CN=Test Short CA"
+issue ca ca.pem shortca.csr ext_ca shortca.pem pol 20240101000000Z 20260601000000Z
+issue shortca shortca.pem dev.csr ext_dev dev_shortca.pem
+mkkey futureca; newdb futureca 8000; mkcsr futureca "/C=DE/O=Test Org/CN=Test Future CA"
+issue ca ca.pem futureca.csr ext_ca futureca.pem pol 20260301000000Z 20440101000000Z
+issue futureca futureca.pem dev.csr ext_dev dev_futureca.pem
 echo "PKI in $out"
