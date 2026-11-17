@@ -6,6 +6,7 @@
 #include <string.h>
 #include "cert_store.h"
 #include "cades_builder.h"
+#include "tsa.h"
 #include "asics_signer.h"
 #include "kv_store.h"
 #include "backend/key_backend.h"
@@ -86,6 +87,25 @@ static esp_err_t probe_sign(const uint8_t digest[32], uint8_t *sig, size_t sig_s
     return ESP_OK;
 }
 
+/* Probe-Hook: Zeitstempel-Token maximaler Groesse (CONFIG_ASICS_TSA_MAX_RESP) als unsigned attribute */
+static esp_err_t probe_tsa_attr(der_t *d, const uint8_t *sig, size_t sig_len, void *ctx)
+{
+    (void)sig; (void)sig_len; (void)ctx;
+    static const uint8_t oid[11] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0E};
+    static const uint8_t zeros[64] = {0};
+    size_t m = der_size(d);
+    size_t n = CONFIG_ASICS_TSA_MAX_RESP;
+    while (n > 0 && !d->err) {
+        size_t c = n > sizeof(zeros) ? sizeof(zeros) : n;
+        der_raw(d, zeros, c);
+        n -= c;
+    }
+    der_wrap(d, m, 0x31);
+    der_oid(d, oid, sizeof(oid));
+    der_wrap(d, m, 0x30);
+    return ESP_OK;
+}
+
 /* Worst-Case-CMS (laengste Signatur, GeneralizedTime) mit den echten Puffergroessen bauen */
 static esp_err_t probe_cms(const uint8_t *dev, size_t dev_len, const asics_der_t *chain, size_t chain_count)
 {
@@ -99,6 +119,9 @@ static esp_err_t probe_cms(const uint8_t *dev, size_t dev_len, const asics_der_t
         .ca_certs = chain, .ca_count = chain_count,
         .sign = probe_sign,
     };
+    if (tsa_configured()) { /* TSA-Betrieb moeglich: Platz fuer einen Token maximaler Groesse vorhalten */
+        p.unsigned_attrs = probe_tsa_attr;
+    }
     size_t n = 0;
     esp_err_t err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &n);
     free(cms);

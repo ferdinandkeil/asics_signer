@@ -11,6 +11,8 @@
 #include "tsa_host.h"
 #include "tsa_resp.h"
 #include "tsa_verify.h"
+#include "asics_provision.h"
+#include "time_source.h"
 
 static size_t unhex(const char *h, uint8_t *out)
 {
@@ -316,6 +318,227 @@ static void test_tsa_verify_certificates(void)
     TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom(&x, "dev.pem", "dev.key"));         /* Geraetezertifikat: keine EKU */
 }
 
+/* ---- Integration: asics_sign_ex mit TSA-Modi ---- */
+static time_t g_dev_offset;
+static time_t real_clock(void) { return time(NULL) + g_dev_offset; }
+
+typedef struct {
+    uint8_t *buf;
+    size_t len;
+} blob_t;
+
+static char *s_ca_pem;
+
+static void tsa_setup(asics_tsa_mode_t mode)
+{
+    g_dev_offset = 0;
+    asics_time_set_provider(real_clock);
+    asics_tsa_host_set_hook(NULL, NULL);
+    asics_tsa_host_set_section("tsa_good");
+    if (!s_ca_pem) {
+        size_t n;
+        s_ca_pem = (char *)test_read_pki("tsa_root.pem", &n);
+    }
+    asics_tsa_host_set_ca_pem(s_ca_pem);
+    test_install_device_key();
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(&(asics_config_t){.tsa_mode = mode}));
+    test_load_certs("dev.pem", "ca.pem");
+}
+
+static bool contains(const uint8_t *buf, size_t n, const uint8_t *pat, size_t pl)
+{
+    for (size_t i = 0; i + pl <= n; i++) {
+        if (!memcmp(buf + i, pat, pl)) return true;
+    }
+    return false;
+}
+
+static const uint8_t OID_STS[] = {0x06, 0x0B, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0E};
+
+static void test_tsa_sign_modes_ok(void)
+{
+    static const uint8_t data[] = "a;b\n1;2\n";
+    asics_sign_result_t res;
+    for (int pass = 0; pass < 2; pass++) {
+        tsa_setup(pass ? ASICS_TSA_REQUIRED : ASICS_TSA_PREFERRED);
+        sink_t s = {0};
+        TEST_ASSERT_EQUAL(pass ? ASICS_TSA_REQUIRED : ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+        TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+        TEST_ASSERT_EQUAL(ASICS_LEVEL_B_T, res.level);
+        TEST_ASSERT_EQUAL(ESP_OK, res.tsa_err);
+        TEST_ASSERT_TRUE(llabs((long long)(res.tsa_gen_time - time(NULL))) < 10);
+        TEST_ASSERT_TRUE(contains(s.buf, s.len, OID_STS, sizeof(OID_STS)));
+        test_write_out(pass ? "sample_tsa_required.asics" : "sample_tsa.asics", s.buf, s.len);
+        sink_free(&s);
+    }
+    /* OFF: B-B, kein Token, TSA wird nicht kontaktiert */
+    tsa_setup(ASICS_TSA_OFF);
+    int calls = 0;
+    asics_tsa_host_set_hook(fail_hook, &calls);
+    sink_t s = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+    TEST_ASSERT_EQUAL(ASICS_LEVEL_B_B, res.level);
+    TEST_ASSERT_EQUAL(ESP_OK, res.tsa_err);
+    TEST_ASSERT_EQUAL(0, calls);
+    TEST_ASSERT_FALSE(contains(s.buf, s.len, OID_STS, sizeof(OID_STS)));
+    sink_free(&s);
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("t.csv", data, sizeof(data) - 1, sink_write, &s));   /* ohne res */
+    sink_free(&s);
+    asics_tsa_host_set_hook(NULL, NULL);
+}
+
+/* ---- Negativfaelle: Hook liefert eine defekte/abgelehnte Antwort ---- */
+typedef enum {
+    F_TRANSPORT, F_REJECTED, F_IMPRINT, F_NONCE, F_SIGNATURE, F_TSTINFO, F_FOREIGN_CA, F_NO_EKU,
+    F_TRUNCATED, F_TOO_BIG, F_NO_TOKEN, F_CLOCK, F_NO_CA, F_COUNT
+} fault_t;
+
+static fault_t g_fault;
+
+/* TimeStampResp aus Token bauen: SEQ { SEQ { INTEGER 0 }, token } */
+static size_t wrap_resp(const uint8_t *tok, size_t n, uint8_t *out)
+{
+    size_t o = 0;
+    static const uint8_t st[] = {0x30, 0x03, 0x02, 0x01, 0x00};
+    size_t body = sizeof(st) + n;
+    out[o++] = 0x30;
+    out[o++] = 0x82;
+    out[o++] = (uint8_t)(body >> 8);
+    out[o++] = (uint8_t)body;
+    memcpy(out + o, st, sizeof(st)); o += sizeof(st);
+    memcpy(out + o, tok, n); o += n;
+    return o;
+}
+
+static esp_err_t fault_hook(const uint8_t *req, size_t rl, uint8_t *resp, size_t rs, size_t *n, void *ctx)
+{
+    (void)ctx;
+    uint8_t q[160];
+    memcpy(q, req, rl);
+    switch (g_fault) {
+    case F_TRANSPORT:
+        return ASICS_ERR_TSA_UNAVAILABLE;
+    case F_TOO_BIG:
+        return ESP_ERR_NO_MEM;
+    case F_REJECTED: {
+        static const uint8_t rej[] = {0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x02};
+        memcpy(resp, rej, sizeof(rej));
+        *n = sizeof(rej);
+        return ESP_OK;
+    }
+    case F_IMPRINT:
+        q[27] ^= 0x01;                    /* Digest-Byte der Anfrage: Antwort bestaetigt einen anderen Imprint */
+        break;
+    case F_NONCE:
+        q[rl - 5] ^= 0x01;                /* Nonce-Byte (vor certReq TRUE) */
+        break;
+    case F_FOREIGN_CA:
+        asics_tsa_host_set_section("tsa_foreign");
+        break;
+    default:
+        break;
+    }
+    esp_err_t e = asics_tsa_host_openssl(q, rl, resp, rs, n);
+    asics_tsa_host_set_section("tsa_good");
+    if (e != ESP_OK) return e;
+    tsa_resp_t r;
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(resp, *n, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    switch (g_fault) {
+    case F_SIGNATURE:
+        ((uint8_t *)r.token)[r.token_len - 3] ^= 0x01;
+        break;
+    case F_TSTINFO:
+        ((uint8_t *)t.tstinfo)[t.tstinfo_len - 1] ^= 0x01;   /* Nonce im TSTInfo: message-digest passt nicht mehr */
+        break;
+    case F_TRUNCATED:
+        *n -= 25;
+        break;
+    case F_NO_TOKEN: {
+        static const uint8_t notok[] = {0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x00};
+        memcpy(resp, notok, sizeof(notok));
+        *n = sizeof(notok);
+        break;
+    }
+    case F_NO_EKU: {   /* TSTInfo der Test-TSA, signiert mit einem TSA-Zertifikat ohne EKU */
+        exch_t x;
+        memcpy(x.resp, resp, *n);
+        x.resp_len = *n;
+        uint8_t tok[4096];
+        size_t tn = cms_token(&x, "tsa_noeku.pem", "tsa.key", tok, sizeof(tok));
+        *n = wrap_resp(tok, tn, resp);
+        break;
+    }
+    default:
+        break;
+    }
+    return ESP_OK;
+}
+
+typedef struct { const char *name; fault_t f; esp_err_t want; int offset; bool no_ca; } fault_case_t;
+
+static void run_fault(const fault_case_t *fc, asics_tsa_mode_t mode)
+{
+    static const uint8_t data[] = "x;y\n";
+    tsa_setup(mode);
+    g_fault = fc->f;
+    g_dev_offset = fc->offset;
+    if (fc->no_ca) asics_tsa_host_set_ca_pem(NULL);
+    asics_tsa_host_set_hook(fault_hook, NULL);
+    sink_t s = {0};
+    asics_sign_result_t res;
+    esp_err_t e = asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res);
+    char msg[96];
+    snprintf(msg, sizeof(msg), "%s (%s)", fc->name, mode == ASICS_TSA_REQUIRED ? "REQUIRED" : "PREFERRED");
+    if (mode == ASICS_TSA_REQUIRED) {
+        TEST_ASSERT_EQUAL_HEX_MESSAGE(fc->want, e, msg);
+        TEST_ASSERT_EQUAL_MESSAGE(0, s.calls, msg);          /* kein Container, kein Callback */
+    } else {
+        TEST_ASSERT_EQUAL_HEX_MESSAGE(ESP_OK, e, msg);
+        TEST_ASSERT_EQUAL_MESSAGE(ASICS_LEVEL_B_B, res.level, msg);
+        TEST_ASSERT_EQUAL_HEX_MESSAGE(fc->want, res.tsa_err, msg);
+        TEST_ASSERT_TRUE_MESSAGE(s.calls > 0 && !contains(s.buf, s.len, OID_STS, sizeof(OID_STS)), msg);
+    }
+    asics_tsa_host_set_hook(NULL, NULL);
+    sink_free(&s);
+}
+
+static void test_tsa_sign_faults(void)
+{
+    static const fault_case_t cases[] = {
+        {"Transportfehler", F_TRANSPORT, ASICS_ERR_TSA_UNAVAILABLE, 0, false},
+        {"Status rejected", F_REJECTED, ASICS_ERR_TSA_REJECTED, 0, false},
+        {"falscher Imprint", F_IMPRINT, ASICS_ERR_TSA_INVALID, 0, false},
+        {"falsche Nonce", F_NONCE, ASICS_ERR_TSA_INVALID, 0, false},
+        {"manipulierte TSA-Signatur", F_SIGNATURE, ASICS_ERR_TSA_INVALID, 0, false},
+        {"manipulierter TSTInfo", F_TSTINFO, ASICS_ERR_TSA_INVALID, 0, false},
+        {"TSA-Zertifikat fremder CA", F_FOREIGN_CA, ASICS_ERR_TSA_INVALID, 0, false},
+        {"TSA-Zertifikat ohne EKU", F_NO_EKU, ASICS_ERR_TSA_INVALID, 0, false},
+        {"Antwort abgeschnitten", F_TRUNCATED, ASICS_ERR_TSA_INVALID, 0, false},
+        {"Antwort zu gross", F_TOO_BIG, ASICS_ERR_TSA_INVALID, 0, false},
+        {"Token fehlt", F_NO_TOKEN, ASICS_ERR_TSA_INVALID, 0, false},
+        {"genTime ausserhalb Toleranz", F_CLOCK, ASICS_ERR_TSA_INVALID, 1000, false},
+        {"keine TSA-CA eingebettet", F_CLOCK, ASICS_ERR_TSA_UNAVAILABLE, 0, true},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        run_fault(&cases[i], ASICS_TSA_PREFERRED);
+        run_fault(&cases[i], ASICS_TSA_REQUIRED);
+    }
+}
+
+/* OFF muss bytegleich zum bisherigen B-B sein: der deterministische Test (test_cades) deckt dies ab; hier
+ * zusaetzlich: Modus-API und Default */
+static void test_tsa_mode_api(void)
+{
+    asics_set_tsa_mode(ASICS_TSA_REQUIRED);
+    TEST_ASSERT_EQUAL(ASICS_TSA_REQUIRED, asics_get_tsa_mode());
+    asics_set_tsa_mode(ASICS_TSA_OFF);
+    TEST_ASSERT_EQUAL(ASICS_TSA_OFF, asics_get_tsa_mode());
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(NULL));        /* cfg == NULL: Kconfig-Default (OFF) */
+    TEST_ASSERT_EQUAL(ASICS_TSA_OFF, asics_get_tsa_mode());
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -327,4 +550,7 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_verify_good);
     RUN_TEST(test_tsa_verify_negative);
     RUN_TEST(test_tsa_verify_certificates);
+    RUN_TEST(test_tsa_sign_modes_ok);
+    RUN_TEST(test_tsa_sign_faults);
+    RUN_TEST(test_tsa_mode_api);
 }

@@ -16,6 +16,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -60,11 +61,34 @@ typedef enum {
     ASICS_STATE_PROVISIONED,     /**< signierbereit */
 } asics_state_t;
 
+/** TSA-Modus (RFC-3161-Zeitstempel, CAdES-B-T). Nur im RAM, nicht persistent. */
+typedef enum {
+    ASICS_TSA_OFF = 0,      /**< kein Zeitstempel: reines CAdES-B-B */
+    ASICS_TSA_PREFERRED,    /**< Zeitstempel versuchen; bei Fehler als B-B ausgeben (Ergebnis in asics_sign_result_t) */
+    ASICS_TSA_REQUIRED,     /**< Zeitstempel erforderlich: bei Fehler nicht signieren, Fehlercode zurueckgeben */
+} asics_tsa_mode_t;
+
+/** Erreichtes CAdES-Niveau des erzeugten Containers. */
+typedef enum {
+    ASICS_LEVEL_B_B,        /**< ohne Zeitstempel */
+    ASICS_LEVEL_B_T,        /**< mit signature-time-stamp (geprueftes TSA-Token) */
+} asics_level_t;
+
+/** Ergebnis von asics_sign_ex(). */
+typedef struct {
+    asics_level_t level;    /**< B_T nur, wenn ein geprueftes Token eingebettet wurde */
+    esp_err_t tsa_err;      /**< Grund, falls (PREFERRED) kein Zeitstempel eingebettet wurde; sonst ESP_OK */
+    time_t tsa_gen_time;    /**< genTime des Zeitstempels (nur bei B_T) */
+} asics_sign_result_t;
+
 /** Konfiguration fuer asics_signer_init(). */
 typedef struct {
     /** Kundenspezifische Seriennummer fuer das CSR-Feld serialNumber
      *  (max. 64 Zeichen, PrintableString-Zeichensatz). NULL/leer = weglassen. */
     const char *device_serial;
+    /** TSA-Modus. Wird bei asics_signer_init(cfg != NULL) uebernommen (ein nullinitialisiertes cfg
+     *  setzt also OFF); bei cfg == NULL gilt der Kconfig-Default. Spaeter: asics_set_tsa_mode(). */
+    asics_tsa_mode_t tsa_mode;
 } asics_config_t;
 
 /**
@@ -95,6 +119,31 @@ asics_state_t asics_signer_get_state(void);
  */
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
                      asics_write_cb_t write, void *ctx);
+
+/** Setzt den TSA-Modus (nur RAM, nicht persistent). */
+void asics_set_tsa_mode(asics_tsa_mode_t mode);
+
+/** Liefert den aktuellen TSA-Modus. */
+asics_tsa_mode_t asics_get_tsa_mode(void);
+
+/**
+ * Wie asics_sign(), meldet zusaetzlich das erreichte Niveau (res darf NULL sein; asics_sign() entspricht
+ * asics_sign_ex(..., NULL)).
+ *
+ * Zeitstempel: Der Token (RFC 3161, SHA-256 ueber den Signaturwert, Nonce, certReq) wird per HTTP von
+ * CONFIG_ASICS_TSA_URL geholt, vollstaendig geprueft (Status, Imprint, Nonce, genTime-Toleranz, Signatur,
+ * TSA-Zertifikat/EKU/Kette zur eingebetteten TSA-CA) und als unsigned attribute signature-time-stamp
+ * eingebettet.
+ *  - ASICS_TSA_OFF: reines B-B (bytegleiches Verhalten wie zuvor).
+ *  - ASICS_TSA_PREFERRED: bei TSA-Fehler B-B, Rueckgabe ESP_OK, res->level = B_B, res->tsa_err = Grund.
+ *  - ASICS_TSA_REQUIRED: bei TSA-Fehler kein Container und kein Callback-Aufruf, Rueckgabe = Fehlercode
+ *    ASICS_ERR_TSA_UNAVAILABLE / _REJECTED / _INVALID.
+ * Ohne TSA-URL oder ohne eingebettete TSA-CA ist ein Zeitstempel nicht moeglich (ASICS_ERR_TSA_UNAVAILABLE).
+ * Der Aufruf blockiert bis zur TSA-Antwort (Timeout CONFIG_ASICS_TSA_TIMEOUT_MS); WLAN/Netz muss die
+ * Anwendung bereitstellen.
+ */
+esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t len,
+                        asics_write_cb_t write, void *ctx, asics_sign_result_t *res);
 
 #ifdef __cplusplus
 }

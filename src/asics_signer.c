@@ -12,6 +12,7 @@
 #include "cert_store.h"
 #include "kv_store.h"
 #include "time_source.h"
+#include "tsa.h"
 #include "zip_writer.h"
 #include "backend/key_backend.h"
 #include "esp_log.h"
@@ -21,6 +22,24 @@
 static const char *TAG = "asics";
 static bool s_inited;
 
+#if CONFIG_ASICS_TSA_DEFAULT_REQUIRED
+static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_REQUIRED;
+#elif CONFIG_ASICS_TSA_DEFAULT_PREFERRED
+static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_PREFERRED;
+#else
+static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_OFF;
+#endif
+
+void asics_set_tsa_mode(asics_tsa_mode_t mode)
+{
+    s_tsa_mode = mode;
+}
+
+asics_tsa_mode_t asics_get_tsa_mode(void)
+{
+    return s_tsa_mode;
+}
+
 esp_err_t asics_signer_init(const asics_config_t *cfg)
 {
     esp_err_t err = asics_key_init();
@@ -29,6 +48,9 @@ esp_err_t asics_signer_init(const asics_config_t *cfg)
         return err;
     }
     s_inited = true;
+    if (cfg) {
+        s_tsa_mode = cfg->tsa_mode;
+    }
     if (cfg && cfg->device_serial) {
         err = asics_provision_set_serial(cfg->device_serial);
         if (err != ESP_OK) {
@@ -56,6 +78,15 @@ asics_state_t asics_signer_get_state(void)
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
                      asics_write_cb_t write, void *ctx)
 {
+    return asics_sign_ex(payload_name, data, len, write, ctx, NULL);
+}
+
+esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t len,
+                        asics_write_cb_t write, void *ctx, asics_sign_result_t *res)
+{
+    if (res) {
+        *res = (asics_sign_result_t){.level = ASICS_LEVEL_B_B, .tsa_err = ESP_OK, .tsa_gen_time = 0};
+    }
     if (!write || (!data && len) || !asics_len_fits_u32(len) ||
         asics_container_check_name(payload_name) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
@@ -83,6 +114,7 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
         return ESP_ERR_NO_MEM;
     }
     mbedtls_x509_crt_init(dev_crt);
+    tsa_hook_ctx_t tsa = {.mode = s_tsa_mode, .now = now, .err = ESP_OK};
     uint8_t *blob = mem, *cms = mem + ASICS_CERT_BLOB_MAX;
     cades_params_t p = {.signing_time = now, .sign = asics_key_sign_adapter};
     asics_der_t refs[CONFIG_ASICS_MAX_CHAIN];
@@ -110,13 +142,28 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     p.dev_crt = dev_crt;
     p.ca_certs = &refs[1];
     p.ca_count = cnt - 1;
+    if (s_tsa_mode != ASICS_TSA_OFF) {
+        tsa.resp = malloc(CONFIG_ASICS_TSA_MAX_RESP);
+        if (!tsa.resp) {
+            err = ESP_ERR_NO_MEM;
+            goto out;
+        }
+        p.unsigned_attrs = tsa_attr_hook;
+        p.unsigned_ctx = &tsa;
+    }
     mbedtls_sha256(data ? data : (const uint8_t *)"", len, p.payload_digest, 0);
     err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);
     if (err != ESP_OK) {
-        goto out;
+        goto out; /* auch REQUIRED + TSA-Fehler: kein Container, kein Callback */
+    }
+    if (res) {
+        res->level = tsa.embedded ? ASICS_LEVEL_B_T : ASICS_LEVEL_B_B;
+        res->tsa_err = tsa.err;
+        res->tsa_gen_time = tsa.embedded ? tsa.gen_time : 0;
     }
     err = asics_container_write(payload_name, data, len, cms, cms_len, now, write, ctx);
 out:
+    free(tsa.resp);
     mbedtls_x509_crt_free(dev_crt);
     free(dev_crt);
     free(mem);

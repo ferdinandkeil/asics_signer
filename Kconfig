@@ -79,12 +79,15 @@ menu "ASiC-S Signer"
 
     config ASICS_CMS_BUF_SIZE
         int "Puffergroesse fuer die CMS-Signatur (Bytes, Heap)"
+        default 9216 if ASICS_TSA_URL != ""
         default 5120
         range 1024 16384
         help
             Muss das CMS der importierten Kette fassen (Zertifikate + Attribute + Signatur;
             Worst Case grob ASICS_MAX_CHAIN * ASICS_CERT_MAX_LEN + 700 Byte, mehr bei langem
             Issuer-DN des Geraetezertifikats).
+            Mit TSA (CONFIG_ASICS_TSA_URL gesetzt) kommt der Zeitstempel-Token (bis
+            CONFIG_ASICS_TSA_MAX_RESP) hinzu; der Default steigt dann auf 9216.
             Der Import prueft das per Probe-Build und lehnt Ketten ab, die nicht in den
             Puffer passen (ESP_ERR_NO_MEM).
 
@@ -129,6 +132,48 @@ menu "ASiC-S Signer"
         int "Timeout der TSA-Anfrage (ms)"
         default 5000
         range 500 60000
+
+    choice ASICS_TSA_DEFAULT_MODE
+        prompt "Standard-TSA-Modus (zur Laufzeit per asics_set_tsa_mode aenderbar)"
+        default ASICS_TSA_DEFAULT_OFF
+        help
+            OFF: reines CAdES-B-B (kein Zeitstempel). PREFERRED: Zeitstempel versuchen, bei Fehler
+            als B-B ausgeben (Ergebnis siehe asics_sign_ex). REQUIRED: bei Fehler nicht signieren.
+
+        config ASICS_TSA_DEFAULT_OFF
+            bool "OFF"
+        config ASICS_TSA_DEFAULT_PREFERRED
+            bool "PREFERRED"
+        config ASICS_TSA_DEFAULT_REQUIRED
+            bool "REQUIRED"
+    endchoice
+
+    config ASICS_TSA_CA_PEM
+        string "Pfad zur PEM-Datei der TSA-CA (in die Firmware eingebettet), leer = keine"
+        default ""
+        help
+            Genau eine vertrauenswuerdige TSA-CA (selbstsigniertes Root- oder Zwischen-CA-Zertifikat
+            mit CA-Flag). Relative Pfade gelten relativ zum Projektverzeichnis. Ohne TSA-CA koennen
+            Zeitstempel nicht geprueft werden: PREFERRED faellt auf B-B zurueck, REQUIRED liefert
+            ASICS_ERR_TSA_UNAVAILABLE.
+
+    config ASICS_TSA_POLICY_OID
+        string "reqPolicy-OID im TimeStampReq (Punktnotation), leer = weglassen"
+        default ""
+
+    config ASICS_TSA_MAX_RESP
+        int "Maximale Groesse der TSA-Antwort / des Tokens (Bytes, Heap)"
+        default 4096
+        range 1024 16384
+        help
+            Antworten, die nicht in den Puffer passen, werden mit ASICS_ERR_TSA_INVALID abgelehnt.
+            Ist CONFIG_ASICS_TSA_URL gesetzt, prueft der Zertifikatsimport, dass das CMS auch mit einem
+            Token dieser Groesse in CONFIG_ASICS_CMS_BUF_SIZE passt.
+
+    config ASICS_TSA_GENTIME_TOLERANCE_S
+        int "Zulaessige Abweichung der TSA-genTime von der Geraeteuhr (s)"
+        default 300
+        range 1 86400
 
     config ASICS_ENABLE_CONSOLE
         bool "UART-Konsolenbefehl 'asics' (status/csr/import)"

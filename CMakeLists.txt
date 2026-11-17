@@ -17,6 +17,7 @@ set(srcs
     "src/tsa_req.c"
     "src/tsa_resp.c"
     "src/tsa_verify.c"
+    "src/tsa.c"
     "src/backend/key_backend.c"
     "src/backend/backend_nvs.c"
     "src/backend/backend_se_stub.c")
@@ -48,6 +49,17 @@ else()
         PRIV_INCLUDE_DIRS "src" "src/backend"
         REQUIRES esp_common
         PRIV_REQUIRES mbedtls nvs_flash esp_rom esp_hw_support bootloader_support console log esp_http_client esp-tls)
+endif()
+
+# Eingebettete TSA-CA (nur Zielsystem; im Host-Test setzt der Test die CA per asics_tsa_host_set_ca_pem)
+if(NOT CMAKE_BUILD_EARLY_EXPANSION AND NOT target STREQUAL "linux" AND NOT "${CONFIG_ASICS_TSA_CA_PEM}" STREQUAL "")
+    get_filename_component(asics_tsa_ca_abs "${CONFIG_ASICS_TSA_CA_PEM}" ABSOLUTE BASE_DIR "${PROJECT_DIR}")
+    if(NOT EXISTS "${asics_tsa_ca_abs}")
+        message(FATAL_ERROR "asics_signer: CONFIG_ASICS_TSA_CA_PEM '${asics_tsa_ca_abs}' nicht gefunden")
+    endif()
+    configure_file("${asics_tsa_ca_abs}" "${CMAKE_CURRENT_BINARY_DIR}/asics_tsa_ca.pem" COPYONLY)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/asics_tsa_ca.pem" TEXT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ASICS_TSA_CA_EMBEDDED=1)
 endif()
 
 # Mindest-Zeitpunkt: Standard ist der Zeitpunkt des CMake-Konfigurationslaufs.
