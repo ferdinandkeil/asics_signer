@@ -16,6 +16,7 @@
 #include "backend/key_backend.h"
 #include "esp_log.h"
 #include "mbedtls/sha256.h"
+#include "mbedtls/x509_crt.h"
 
 static inline bool len_fits_u32(size_t n)
 {
@@ -91,9 +92,13 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     }
 
     uint8_t *mem = malloc(ASICS_CERT_BLOB_MAX + CONFIG_ASICS_CMS_BUF_SIZE);
-    if (!mem) {
+    mbedtls_x509_crt *dev_crt = calloc(1, sizeof(*dev_crt));
+    if (!mem || !dev_crt) {
+        free(mem);
+        free(dev_crt);
         return ESP_ERR_NO_MEM;
     }
+    mbedtls_x509_crt_init(dev_crt);
     uint8_t *blob = mem, *cms = mem + ASICS_CERT_BLOB_MAX;
     cades_params_t p = {.signing_time = now, .sign = hal_sign};
     asics_der_t refs[CONFIG_ASICS_MAX_CHAIN];
@@ -103,8 +108,14 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     if (err != ESP_OK) {
         goto out;
     }
+    /* Geraetezertifikat einmal parsen: Validitaetspruefung und cades_build nutzen dasselbe Ergebnis */
+    if (mbedtls_x509_crt_parse_der(dev_crt, refs[0].der, refs[0].len) != 0 || dev_crt->next != NULL) {
+        err = ASICS_ERR_CERT_PARSE;
+        goto out;
+    }
     for (size_t i = 0; i < cnt; i++) { /* Geraetezertifikat und alle CA-Zertifikate der Kette */
-        err = asics_cert_check_validity(refs[i].der, refs[i].len, now);
+        err = i == 0 ? asics_cert_check_validity_crt(dev_crt, now)
+                     : asics_cert_check_validity(refs[i].der, refs[i].len, now);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Zertifikat %u der Kette zum Signierzeitpunkt nicht gueltig - keine Signatur", (unsigned)i);
             goto out; /* ASICS_ERR_SIGNER_CERT_VALIDITY */
@@ -112,6 +123,7 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     }
     p.dev_cert = refs[0].der;
     p.dev_cert_len = refs[0].len;
+    p.dev_crt = dev_crt;
     p.ca_certs = &refs[1];
     p.ca_count = cnt - 1;
     mbedtls_sha256(data ? data : (const uint8_t *)"", len, p.payload_digest, 0);
@@ -121,6 +133,8 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     }
     err = asics_container_write(payload_name, data, len, cms, cms_len, now, write, ctx);
 out:
+    mbedtls_x509_crt_free(dev_crt);
+    free(dev_crt);
     free(mem);
     return err;
 }

@@ -11,6 +11,7 @@
 #include "esp_err.h"
 #include "asics_signer.h"
 #include "sdkconfig.h"
+#include "mbedtls/x509_crt.h"
 
 /** Maximale Blobgroesse (Header + alle Zertifikate) fuer asics_cert_store_load(). */
 #define ASICS_CERT_BLOB_MAX \
@@ -39,6 +40,9 @@ esp_err_t asics_cert_store_load(uint8_t *buf, size_t buf_size, size_t *count,
 
 /** true, wenn ein plausibler Zertifikatsblob vorhanden ist. */
 bool asics_cert_store_present(void);
+
+/** Wie asics_cert_check_validity, fuer ein bereits geparstes Zertifikat. */
+esp_err_t asics_cert_check_validity_crt(const mbedtls_x509_crt *crt, time_t now);
 
 /** Prueft notBefore/notAfter eines (beliebigen) DER-Zertifikats gegen now.
  *  ESP_OK, ASICS_ERR_CERT_PARSE oder ASICS_ERR_SIGNER_CERT_VALIDITY (mit Log-Meldung). */

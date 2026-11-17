@@ -269,13 +269,21 @@ bool asics_cert_store_present(void)
     return asics_kv_get(CERTS_KEY, NULL, &len) == ESP_OK && len > 3;
 }
 
+esp_err_t asics_cert_check_validity_crt(const mbedtls_x509_crt *crt, time_t now)
+{
+    if (!valid_at(crt, now)) {
+        ESP_LOGE(TAG, "Zertifikat zum angegebenen Zeitpunkt nicht gueltig");
+        return ASICS_ERR_SIGNER_CERT_VALIDITY;
+    }
+    return ESP_OK;
+}
+
 esp_err_t asics_cert_check_validity(const uint8_t *der, size_t len, time_t now)
 {
     mbedtls_x509_crt c;
     esp_err_t err = parse_one(&c, der, len);
-    if (err == ESP_OK && !valid_at(&c, now)) {
-        ESP_LOGE(TAG, "Zertifikat zum angegebenen Zeitpunkt nicht gueltig");
-        err = ASICS_ERR_SIGNER_CERT_VALIDITY;
+    if (err == ESP_OK) {
+        err = asics_cert_check_validity_crt(&c, now);
     }
     mbedtls_x509_crt_free(&c);
     return err;

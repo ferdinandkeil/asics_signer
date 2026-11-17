@@ -101,7 +101,7 @@ everything that persists data goes through a small key/value store interface.
 |--------|----------------|
 | `include/asics_signer.h` | Public API: initialisation, provisioning state, `asics_sign()`, error codes |
 | `include/asics_provision.h` | Public provisioning API: serial number, key creation, public key, CSR (DER/PEM), chain import (DER/PEM), console registration |
-| `src/asics_signer.c` | Orchestrates signing: checks arguments, state and clock, loads the chain, checks the validity of the device certificate and every CA certificate, calls the CAdES builder and the container writer |
+| `src/asics_signer.c` | Orchestrates signing: checks arguments, state and clock, loads the chain, checks the validity of the device certificate and every CA certificate (the device certificate is parsed once and reused by the CAdES builder), calls the CAdES builder and the container writer |
 | `src/asics_provision.c` | Provisioning logic and the state machine (`NO_KEY → KEY_NO_CERT → PROVISIONED`) |
 | `src/asics_container.c`, `src/zip_writer.c` | Streams the ASiC-S ZIP (local headers, central directory, end record) through the write callback; the payload is passed through without copying |
 | `src/cades_builder.c` | Builds the CMS `SignedData` and signed attributes; signs through a callback that reaches the HAL |

@@ -82,14 +82,18 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     esp_err_t err = ESP_ERR_NO_MEM;
     const size_t abs = CONFIG_ASICS_ATTRS_BUF_SIZE;
     uint8_t *scratch = malloc(2 * abs);
-    mbedtls_x509_crt *crt = calloc(1, sizeof(*crt));
-    if (!scratch || !crt) {
+    mbedtls_x509_crt *own = p->dev_crt ? NULL : calloc(1, sizeof(*own)); /* nur ohne vorgeparstes Zertifikat */
+    if (!scratch || (!p->dev_crt && !own)) {
         goto done;
     }
-    mbedtls_x509_crt_init(crt);
-    if (mbedtls_x509_crt_parse_der(crt, p->dev_cert, p->dev_cert_len) != 0 || crt->next != NULL) {
-        err = ESP_ERR_INVALID_ARG;
-        goto done;
+    const mbedtls_x509_crt *crt = p->dev_crt;
+    if (!crt) {
+        mbedtls_x509_crt_init(own);
+        if (mbedtls_x509_crt_parse_der(own, p->dev_cert, p->dev_cert_len) != 0 || own->next != NULL) {
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
+        }
+        crt = own;
     }
 
     /* ---- Signed Attributes: Einzelattribute in Bereich 1 ---- */
@@ -241,9 +245,9 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     err = ESP_OK;
 
 done:
-    if (crt) {
-        mbedtls_x509_crt_free(crt);
-        free(crt);
+    if (own) {
+        mbedtls_x509_crt_free(own);
+        free(own);
     }
     free(scratch);
     return err;

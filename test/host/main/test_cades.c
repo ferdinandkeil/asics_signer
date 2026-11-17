@@ -188,6 +188,28 @@ static void test_cades_structure_and_determinism(void)
     for (int i = 0; i < 4; i++) TEST_ASSERT_TRUE(seen[i]);
 }
 
+/* Mit vorgeparstem Geraetezertifikat (dev_crt) identische Ausgabe wie mit internem Parsen */
+static void test_cades_prepared_crt(void)
+{
+    size_t n1 = build(TEST_TIME, false);
+    uint8_t copy[CONFIG_ASICS_CMS_BUF_SIZE];
+    memcpy(copy, cms, n1);
+    size_t dl, cl, n2;
+    uint8_t *dev = test_pem_to_der("dev.pem", &dl), *ca = test_pem_to_der("ca.pem", &cl);
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+    TEST_ASSERT_EQUAL(0, mbedtls_x509_crt_parse_der(&crt, dev, dl));
+    asics_der_t cad = {ca, cl};
+    cades_params_t p = {.signing_time = TEST_TIME, .dev_cert = dev, .dev_cert_len = dl, .dev_crt = &crt,
+                        .ca_certs = &cad, .ca_count = 1, .sign = stub_sign};
+    memset(p.payload_digest, 0xAB, 32);
+    TEST_ASSERT_EQUAL(ESP_OK, cades_build(&p, cms, sizeof(cms), &n2));
+    TEST_ASSERT_EQUAL(n1, n2);
+    TEST_ASSERT_EQUAL_MEMORY(copy, cms, n1);
+    mbedtls_x509_crt_free(&crt);
+    free(dev); free(ca);
+}
+
 static void test_cades_time_encoding(void)
 {
     size_t n = build(TEST_TIME, false);
@@ -342,6 +364,7 @@ static void test_chain_in_cms(void)
 void run_cades_tests(void)
 {
     RUN_TEST(test_cades_structure_and_determinism);
+    RUN_TEST(test_cades_prepared_crt);
     RUN_TEST(test_cades_time_encoding);
     RUN_TEST(test_cades_time_range);
     RUN_TEST(test_cades_unsigned_hook);

@@ -9,6 +9,7 @@
 
 #include "asics_internal.h"
 #include "asics_signer.h"
+#include "mbedtls/x509_crt.h"
 #include "der_writer.h"
 
 /**
@@ -24,6 +25,7 @@ typedef struct {
     uint8_t payload_digest[ASICS_DIGEST_LEN]; /**< SHA-256 der Nutzdaten */
     time_t signing_time;
     const uint8_t *dev_cert; size_t dev_cert_len; /**< Geraetezertifikat (DER) */
+    const mbedtls_x509_crt *dev_crt;              /**< optional: bereits geparstes dev_cert (spart erneutes Parsen) */
     const asics_der_t *ca_certs; size_t ca_count; /**< CA-Kette (1..n, Issuing-CA zuerst) */
     asics_sign_fn_t sign; void *sign_ctx;
     cades_unsigned_attrs_cb_t unsigned_attrs; void *unsigned_ctx; /**< optional */
