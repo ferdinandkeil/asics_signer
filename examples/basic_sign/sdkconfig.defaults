@@ -7,3 +7,8 @@ CONFIG_ASICS_REQUIRE_FLASH_ENCRYPTION=n
 CONFIG_ASICS_SUBJECT_COUNTRY="DE"
 CONFIG_ASICS_SUBJECT_ORG="Beispiel GmbH"
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
+# Zeitstempel (CAdES-B-T): TSA-URL und TSA-CA bewusst leer (siehe README). Zum Aktivieren z. B.
+#   CONFIG_ASICS_TSA_URL="http://<tsa-host>/api/v1/timestamp"
+#   CONFIG_ASICS_TSA_CA_PEM="tsa_ca.pem"      (Pfad relativ zum Projektverzeichnis, PEM der TSA-CA)
+CONFIG_ASICS_TSA_URL=""
+CONFIG_ASICS_TSA_CA_PEM=""
