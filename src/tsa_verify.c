@@ -144,6 +144,23 @@ static bool verify_signature(mbedtls_pk_context *pk, mbedtls_md_type_t md, const
     return mbedtls_pk_verify_ext(MBEDTLS_PK_RSASSA_PSS, &opt, pk, md, hash, hash_len, sig, sig_len) == 0;
 }
 
+typedef struct {
+    time_t gen_time;
+    bool ok;
+} time_check_t;
+
+/* mbedtls-Verify-Callback: Gueltigkeit jedes Kettenglieds gegen genTime (statt gegen die Systemuhr) */
+static int vrfy_time_cb(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags)
+{
+    (void)depth;
+    time_check_t *tc = ctx;
+    *flags &= ~(uint32_t)(MBEDTLS_X509_BADCERT_EXPIRED | MBEDTLS_X509_BADCERT_FUTURE);
+    if (asics_cert_check_validity_crt(crt, tc->gen_time) != ESP_OK) {
+        tc->ok = false;
+    }
+    return 0;
+}
+
 esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time)
 {
     esp_err_t err = ASICS_ERR_TSA_INVALID;
@@ -285,6 +302,25 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
         }
     }
 
+    /* --- Weitere Zertifikate des Tokens als untrusted Zwischenzertifikate an die Kette haengen --- */
+    {
+        const uint8_t *leaf_der = tsa->raw.p;
+        der_rd_t again = t->certs;
+        while (!der_rd_done(&again)) {
+            const uint8_t *ctlv;
+            size_t ctlen;
+            if (!der_rd_next(&again, &tag, &v, &vl, &ctlv, &ctlen) || tag != 0x30) {
+                FAIL("certificates defekt");
+            }
+            if (ctlen == tsa->raw.len && memcmp(ctlv, leaf_der, ctlen) == 0) {
+                continue; /* das TSA-Zertifikat selbst */
+            }
+            if (mbedtls_x509_crt_parse_der(tsa, ctlv, ctlen) != 0) {
+                FAIL("Zertifikat im Token nicht parsebar");
+            }
+        }
+    }
+
     /* --- Signatur ueber die DER-Signed-Attributes (Tag 0x31 statt 0xA0) --- */
     attrs_copy = malloc(attrs_tlen);
     if (!attrs_copy) {
@@ -312,14 +348,16 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
     if (mbedtls_x509_crt_get_ca_istrue(ca) != 1) {
         FAIL("eingebettete TSA-CA hat kein CA-Flag");
     }
+    /* Kette: TSA-Zertifikat (Blatt) + untrusted Zwischenzertifikate aus dem Token -> eingebettete TSA-CA (Anker).
+     * Die Zeitpruefung erfolgt im Callback fuer jedes tatsaechlich verwendete Kettenglied gegen genTime. */
+    time_check_t tc = {.gen_time = gen_time, .ok = true};
     uint32_t flags = 0;
-    int rc = mbedtls_x509_crt_verify(tsa, ca, NULL, NULL, &flags, NULL, NULL);
-    flags &= ~(uint32_t)(MBEDTLS_X509_BADCERT_EXPIRED | MBEDTLS_X509_BADCERT_FUTURE);
+    int rc = mbedtls_x509_crt_verify(tsa, ca, NULL, NULL, &flags, vrfy_time_cb, &tc);
     if ((rc != 0 && rc != MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) || flags != 0) {
-        FAIL("TSA-Zertifikat nicht von der eingebetteten TSA-CA signiert");
+        FAIL("TSA-Zertifikat nicht ueber die eingebettete TSA-CA verifizierbar");
     }
-    if (asics_cert_check_validity_crt(tsa, gen_time) != ESP_OK || asics_cert_check_validity_crt(ca, gen_time) != ESP_OK) {
-        FAIL("TSA-Zertifikat oder TSA-CA zur genTime nicht gueltig");
+    if (!tc.ok || asics_cert_check_validity_crt(ca, gen_time) != ESP_OK) {
+        FAIL("Zertifikat der TSA-Kette zur genTime nicht gueltig");
     }
     err = ESP_OK;
 done:

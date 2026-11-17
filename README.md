@@ -253,8 +253,9 @@ callback. Redirects are not followed.
 * the `signatureAlgorithm` must be known and match the key type and the `digestAlgorithm`: `ecdsa-with-SHA256/384/512`,
   `rsaEncryption` / `sha256/384/512WithRSAEncryption` (PKCS#1 v1.5) or RSASSA-PSS (hash, MGF1 and salt length taken from the
   parameters, SHA-2 only); anything else is `ASICS_ERR_TSA_INVALID`. The signature is checked over the DER signed attributes
-* the TSA certificate carries a **critical** extended key usage `timeStamping` and no other usage, is signed by
-  the embedded TSA CA (which needs the CA flag) and is valid at `genTime`
+* the TSA certificate carries a **critical** extended key usage `timeStamping` and no other usage, chains up to
+  the embedded TSA CA (the trust anchor, which needs the CA flag); further certificates in the token serve as
+  untrusted intermediates, and every certificate of the chain must be valid at `genTime`
 
 **Configuration.** Set `CONFIG_ASICS_TSA_URL` and `CONFIG_ASICS_TSA_CA_PEM`, the path of exactly one trusted
 TSA CA as a PEM file (relative paths are relative to the project directory); it is embedded in the firmware.

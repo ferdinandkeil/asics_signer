@@ -280,8 +280,17 @@ static void test_tsa_verify_negative(void)
 }
 
 /* Eigene Token per openssl cms -sign (TSTInfo der Test-TSA, anderes Signaturzertifikat) */
+static size_t cms_token_full(const exch_t *x, const char *cert, const char *key, const char *md, const char *extra,
+                             const char *certfile, uint8_t *out, size_t cap);
+
 static size_t cms_token_ex(const exch_t *x, const char *cert, const char *key, const char *md, const char *extra,
                            uint8_t *out, size_t cap)
+{
+    return cms_token_full(x, cert, key, md, extra, "tsa_root.pem", out, cap);
+}
+
+static size_t cms_token_full(const exch_t *x, const char *cert, const char *key, const char *md, const char *extra,
+                             const char *certfile, uint8_t *out, size_t cap)
 {
     tsa_resp_t r;
     tsa_token_t t;
@@ -297,8 +306,8 @@ static size_t cms_token_ex(const exch_t *x, const char *cert, const char *key, c
     fclose(f);
     snprintf(cmd, sizeof(cmd),
              "openssl cms -sign -binary -nodetach -outform DER -in %s -econtent_type 1.2.840.113549.1.9.16.1.4 "
-             "-signer %s/%s -inkey %s/%s -certfile %s/tsa_root.pem -md %s %s -cades -out %s 2>/dev/null",
-             in, pki, cert, pki, key, pki, md, extra, tok);
+             "-signer %s/%s -inkey %s/%s -certfile %s/%s -md %s %s -cades -out %s 2>/dev/null",
+             in, pki, cert, pki, key, pki, certfile, md, extra, tok);
     TEST_ASSERT_EQUAL(0, system(cmd));
     f = fopen(tok, "rb");
     size_t n = fread(out, 1, cap, f);
@@ -716,6 +725,36 @@ static void test_tsa_policy_check(void)
     TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
 }
 
+/* Zwischenzertifikate aus dem Token: Anker = Root, Kette Root -> Intermediate -> TSA-Blatt, Intermediate nur im Token */
+static esp_err_t verify_chain_token(const exch_t *x, const char *leaf, const char *certfile, const char *anchor, time_t gen)
+{
+    static uint8_t tok[8192];
+    size_t n = cms_token_full(x, leaf, "tsa.key", "sha256", "", certfile, tok, sizeof(tok));
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(tok, n, &t));
+    size_t cl;
+    uint8_t *ca = test_pem_to_der(anchor, &cl);
+    esp_err_t e = tsa_verify_token(&t, ca, cl, gen);
+    free(ca);
+    return e;
+}
+
+static void test_tsa_verify_intermediate(void)
+{
+    exch_t x;
+    exchange(&x, 0x6E);
+    time_t now = time(NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_inter.pem", "tsa_root.pem", now));
+    /* Zwischenzertifikat fehlt im Token -> keine Kette */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_root.pem", "tsa_root.pem", now));
+    /* anderer Anker */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_inter.pem", "tsa_root2.pem", now));
+    /* Anker ist die Zwischen-CA selbst: Blatt direkt darunter */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_inter.pem", "tsa_inter.pem", now));
+    /* Gueltigkeit des Zwischenzertifikats zur genTime (2024..2044) */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_inter.pem", "tsa_root.pem", (time_t)1600000000));
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -729,6 +768,7 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_verify_negative);
     RUN_TEST(test_tsa_verify_certificates);
     RUN_TEST(test_tsa_verify_sigalgs);
+    RUN_TEST(test_tsa_verify_intermediate);
     RUN_TEST(test_tsa_policy_check);
     RUN_TEST(test_tsa_sign_modes_ok);
     RUN_TEST(test_tsa_sign_faults);

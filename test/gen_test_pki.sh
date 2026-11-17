@@ -119,6 +119,7 @@ issue futureca futureca.pem dev.csr ext_dev dev_futureca.pem
 #   tsa_noeku.pem:  gleicher Schluessel, aber OHNE EKU (Negativtest; openssl ts -reply kann damit nicht
 #                   antworten, der Test baut die Antwort per openssl cms -sign)
 #   tsa_foreign.pem: gleicher Schluessel, EKU ok, aber von tsa_root2 (fremde CA)
+#   tsa_inter.pem, tsa_leaf2.pem: Zwischen-CA unter tsa_root und TSA-Zertifikat (Schluessel tsa.key) darunter
 #   tsa_rsa.pem/.key: TSA-Zertifikat mit RSA-2048-Schluessel (EKU ok, von tsa_root)
 #   tsa.cnf:        Konfiguration fuer "openssl ts -reply" (Sektionen tsa_good, tsa_foreign)
 mkkey tsa_root;  newdb tsa_root 9000;  mkcsr tsa_root "/C=DE/O=Test Org/CN=Test TSA Root"
@@ -126,7 +127,11 @@ issue tsa_root "" tsa_root.csr ext_root tsa_root.pem
 mkkey tsa_root2; newdb tsa_root2 9500; mkcsr tsa_root2 "/C=DE/O=Test Org/CN=Fremde TSA Root"
 issue tsa_root2 "" tsa_root2.csr ext_root tsa_root2.pem
 mkkey tsa; mkcsr tsa "/C=DE/O=Test Org/CN=Test TSA"
+# Kette tsa_root -> tsa_inter -> tsa_leaf2 (TSA-Zertifikat unter einer Zwischen-CA, gleicher Schluessel wie tsa)
+mkkey tsa_inter; newdb tsa_inter 9700; mkcsr tsa_inter "/C=DE/O=Test Org/CN=Test TSA Intermediate"
+issue tsa_root tsa_root.pem tsa_inter.csr ext_ca tsa_inter.pem
 issue tsa_root tsa_root.pem tsa.csr ext_tsa tsa.pem
+issue tsa_inter tsa_inter.pem tsa.csr ext_tsa tsa_leaf2.pem
 issue tsa_root tsa_root.pem tsa.csr ext_dev tsa_noeku.pem
 issue tsa_root2 tsa_root2.pem tsa.csr ext_tsa tsa_foreign.pem
 openssl genrsa -out tsa_rsa.key 2048 2>/dev/null
