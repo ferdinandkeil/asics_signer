@@ -6,7 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "test_support.h"
+#include "asics_signer.h"
 #include "tsa_req.h"
+#include "tsa_host.h"
 
 static size_t unhex(const char *h, uint8_t *out)
 {
@@ -57,8 +59,41 @@ static void test_tsa_request_errors(void)
     test_write_out("tsa_request.tsq", buf, n);
 }
 
+/* Host-Transport: openssl ts -reply beantwortet die Anfrage; Hook ersetzt/stoert den Transport */
+static esp_err_t fail_hook(const uint8_t *req, size_t rl, uint8_t *resp, size_t rs, size_t *n, void *ctx)
+{
+    (void)req; (void)rl; (void)resp; (void)rs; (void)n; (*(int *)ctx)++;
+    return ASICS_ERR_TSA_UNAVAILABLE;
+}
+
+static void test_tsa_host_transport(void)
+{
+    uint8_t digest[32], nonce[8] = {1, 2, 3, 4, 5, 6, 7, 8}, req[128], resp[4096];
+    memset(digest, 0x22, sizeof(digest));
+    size_t rl, n;
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_build_request(digest, nonce, NULL, req, sizeof(req), &rl));
+    asics_tsa_host_set_hook(NULL, NULL);
+    asics_tsa_host_set_section("tsa_good");
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, resp, sizeof(resp), &n));
+    TEST_ASSERT_TRUE(n > 200 && resp[0] == 0x30);
+    test_write_out("tsa_reply.tsr", resp, n);
+    test_write_out("tsa_reply_request.tsq", req, rl);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, asics_tsa_transport(req, rl, resp, 100, &n));   /* Antwort zu gross */
+    /* fremde TSA-Sektion antwortet ebenfalls */
+    asics_tsa_host_set_section("tsa_foreign");
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, resp, sizeof(resp), &n));
+    asics_tsa_host_set_section("tsa_good");
+    /* Hook */
+    int calls = 0;
+    asics_tsa_host_set_hook(fail_hook, &calls);
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_UNAVAILABLE, asics_tsa_transport(req, rl, resp, sizeof(resp), &n));
+    TEST_ASSERT_EQUAL(1, calls);
+    asics_tsa_host_set_hook(NULL, NULL);
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
     RUN_TEST(test_tsa_request_errors);
+    RUN_TEST(test_tsa_host_transport);
 }

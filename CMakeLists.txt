@@ -31,7 +31,7 @@ if(target STREQUAL "linux")
         set_source_files_properties(${mbed_srcs} PROPERTIES COMPILE_OPTIONS "-w")
     endif()
     idf_component_register(
-        SRCS ${srcs} "src/kv_ram.c" ${mbed_srcs}
+        SRCS ${srcs} "src/kv_ram.c" "src/tsa_host.c" ${mbed_srcs}
         INCLUDE_DIRS "include" "${mbed_dir}/include"
         PRIV_INCLUDE_DIRS "src" "src/backend" "${mbed_dir}/library"
         PRIV_REQUIRES esp_rom esp_hw_support log)

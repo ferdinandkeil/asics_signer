@@ -1,0 +1,19 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/* Nur Host-Build: Testhilfen fuer den TSA-Transport. */
+#pragma once
+
+#include "tsa_transport.h"
+
+/** Test-Hook: ersetzt den Transport vollstaendig (NULL = Standard: openssl ts -reply). */
+typedef esp_err_t (*asics_tsa_host_hook_t)(const uint8_t *req, size_t req_len, uint8_t *resp, size_t resp_size,
+                                           size_t *resp_len, void *ctx);
+void asics_tsa_host_set_hook(asics_tsa_host_hook_t hook, void *ctx);
+
+/** Sektion in tsa.cnf (Verzeichnis aus ASICS_TEST_PKI): "tsa_good" (Standard) oder "tsa_foreign". */
+void asics_tsa_host_set_section(const char *section);
+
+/** Standardtransport: ruft "openssl ts -reply -config $ASICS_TEST_PKI/tsa.cnf" per popen auf. */
+esp_err_t asics_tsa_host_openssl(const uint8_t *req, size_t req_len, uint8_t *resp, size_t resp_size, size_t *resp_len);

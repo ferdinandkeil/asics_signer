@@ -48,6 +48,11 @@ grep -q "Version: 1" tsa_request.txt && grep -q "Hash Algorithm: sha256" tsa_req
   grep -q "Nonce: 0x0102030405060708" tsa_request.txt && grep -q "Certificate required: yes" tsa_request.txt && \
   grep -q "Policy OID: 1.2.3.4" tsa_request.txt || { echo "FEHLER: TimeStampReq nicht wie erwartet"; exit 1; }
 
+echo "== openssl ts -reply (Antwort der Test-TSA)"
+openssl ts -reply -in tsa_reply.tsr -text | tee tsa_reply.txt
+grep -q "Status: Granted" tsa_reply.txt && grep -q "Nonce: 0x0102030405060708" tsa_reply.txt || { echo "FEHLER: TSA-Antwort unerwartet"; exit 1; }
+openssl ts -verify -in tsa_reply.tsr -queryfile tsa_reply_request.tsq -CAfile "$pki/tsa_root.pem"
+
 echo "== openssl req -verify"
 openssl req -verify -noout -in device.csr.pem
 
