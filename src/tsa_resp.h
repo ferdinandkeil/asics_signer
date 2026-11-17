@@ -42,6 +42,7 @@ typedef struct {
     size_t nonce_len;
     time_t now;                  /**< Geraeteuhr */
     unsigned tolerance_s;        /**< zulaessige Abweichung genTime <-> now */
+    const char *policy_oid;      /**< erwartete TSTInfo.policy (Punktnotation); NULL/"" = nicht pruefen */
 } tsa_expect_t;
 
 /** Prueft TSTInfo (Version 1, Imprint SHA-256, Nonce, genTime-Toleranz); ASICS_ERR_TSA_INVALID. */

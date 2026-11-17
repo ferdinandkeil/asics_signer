@@ -246,10 +246,13 @@ callback. Redirects are not followed.
 * PKIStatus `granted` or `grantedWithMods`; the token is a `SignedData` with `eContentType` `id-ct-TSTInfo`
   and exactly one `SignerInfo`
 * `TSTInfo`: version 1, `messageImprint` (SHA-256 and value) and nonce match the request, `genTime` is within
-  `CONFIG_ASICS_TSA_GENTIME_TOLERANCE_S` (default 300 s) of the device clock
+  `CONFIG_ASICS_TSA_GENTIME_TOLERANCE_S` (default 300 s) of the device clock; if `CONFIG_ASICS_TSA_POLICY_OID` is set,
+  `TSTInfo.policy` must equal it exactly
 * signed attributes: `content-type` = `id-ct-TSTInfo`, `message-digest` over the `eContent`, and an ESS
   `signing-certificate` or `signing-certificate-v2` whose hash matches the TSA certificate in the token
-* the signature over the DER signed attributes (ECDSA or RSA PKCS#1 v1.5; digest SHA-256, -384 or -512)
+* the `signatureAlgorithm` must be known and match the key type and the `digestAlgorithm`: `ecdsa-with-SHA256/384/512`,
+  `rsaEncryption` / `sha256/384/512WithRSAEncryption` (PKCS#1 v1.5) or RSASSA-PSS (hash, MGF1 and salt length taken from the
+  parameters, SHA-2 only); anything else is `ASICS_ERR_TSA_INVALID`. The signature is checked over the DER signed attributes
 * the TSA certificate carries a **critical** extended key usage `timeStamping` and no other usage, is signed by
   the embedded TSA CA (which needs the CA flag) and is valid at `genTime`
 
@@ -324,7 +327,7 @@ Menu **ASiC-S Signer**:
 | `ASICS_TSA_URL` | empty | TSA endpoint (HTTP/HTTPS); empty = no time stamps possible |
 | `ASICS_TSA_DEFAULT_OFF` / `_PREFERRED` / `_REQUIRED` | OFF | Initial TSA mode (changeable at run time) |
 | `ASICS_TSA_CA_PEM` | empty | PEM file of the single trusted TSA CA, embedded in the firmware |
-| `ASICS_TSA_POLICY_OID` | empty | `reqPolicy` OID in the request (omitted if empty) |
+| `ASICS_TSA_POLICY_OID` | empty | `reqPolicy` OID in the request and required `TSTInfo.policy` of the answer (neither if empty) |
 | `ASICS_TSA_TIMEOUT_MS` | 5000 | Timeout of the TSA request |
 | `ASICS_TSA_MAX_RESP` | 4096 | Maximum TSA response / token size (heap) |
 | `ASICS_TSA_GENTIME_TOLERANCE_S` | 300 | Allowed difference between `genTime` and the device clock |

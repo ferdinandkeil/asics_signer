@@ -71,6 +71,79 @@ static bool eku_ok(const mbedtls_x509_crt *c)
     return false;
 }
 
+/* Signatur pruefen: signatureAlgorithm muss zum Schluesseltyp und zum digestAlgorithm passen.
+ * Unterstuetzt: ecdsa-with-SHA256/384/512; rsaEncryption und sha256/384/512WithRSAEncryption (PKCS#1 v1.5);
+ * RSASSA-PSS (Hash/MGF1/Salt-Laenge aus den Parametern). Alles andere -> false. */
+static bool verify_signature(mbedtls_pk_context *pk, mbedtls_md_type_t md, const uint8_t *oid, size_t oid_len,
+                             der_rd_t *params, const uint8_t *hash, size_t hash_len, const uint8_t *sig, size_t sig_len)
+{
+    mbedtls_pk_type_t kt = mbedtls_pk_get_type(pk);
+    mbedtls_md_type_t alg_md = MBEDTLS_MD_NONE; /* in der Algorithmus-OID festgelegter Hash (NONE: offen) */
+    bool ecdsa = false, rsa_v15 = false;
+    if (OIDEQ(oid, oid_len, ASN1_OID_ECDSA_SHA256)) { ecdsa = true; alg_md = MBEDTLS_MD_SHA256; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_ECDSA_SHA384)) { ecdsa = true; alg_md = MBEDTLS_MD_SHA384; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_ECDSA_SHA512)) { ecdsa = true; alg_md = MBEDTLS_MD_SHA512; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_RSA_ENCRYPTION)) { rsa_v15 = true; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_SHA256_RSA)) { rsa_v15 = true; alg_md = MBEDTLS_MD_SHA256; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_SHA384_RSA)) { rsa_v15 = true; alg_md = MBEDTLS_MD_SHA384; }
+    else if (OIDEQ(oid, oid_len, ASN1_OID_SHA512_RSA)) { rsa_v15 = true; alg_md = MBEDTLS_MD_SHA512; }
+
+    if (ecdsa || rsa_v15) {
+        if ((ecdsa && kt != MBEDTLS_PK_ECKEY) || (rsa_v15 && kt != MBEDTLS_PK_RSA) ||
+            (alg_md != MBEDTLS_MD_NONE && alg_md != md)) {
+            return false;
+        }
+        return mbedtls_pk_verify(pk, md, hash, hash_len, sig, sig_len) == 0;
+    }
+    if (!OIDEQ(oid, oid_len, ASN1_OID_RSASSA_PSS) || kt != MBEDTLS_PK_RSA) {
+        return false;
+    }
+    /* RSASSA-PSS-params ::= SEQUENCE { [0] hashAlgorithm (Default sha1), [1] maskGenAlgorithm (Default mgf1SHA1),
+     * [2] saltLength (Default 20), [3] trailerField (Default 1) } - SHA-1 wird nicht akzeptiert */
+    der_rd_t p, hrd, mrd, malg, mhash;
+    uint8_t tag;
+    const uint8_t *v;
+    size_t vl;
+    if (!der_rd_enter(params, 0x30, &p) || der_rd_peek(&p) != 0xA0 || !der_rd_enter(&p, 0xA0, &hrd) ||
+        !der_rd_enter(&hrd, 0x30, &mhash) || !der_rd_next(&mhash, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
+        return false;
+    }
+    mbedtls_md_type_t hmd = md_from_oid(v, vl, false);
+    if (hmd == MBEDTLS_MD_NONE || hmd != md) {
+        return false;
+    }
+    if (der_rd_peek(&p) != 0xA1 || !der_rd_enter(&p, 0xA1, &mrd) || !der_rd_enter(&mrd, 0x30, &malg) ||
+        !der_rd_next(&malg, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, ASN1_OID_MGF1) ||
+        !der_rd_enter(&malg, 0x30, &mhash) || !der_rd_next(&mhash, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
+        return false;
+    }
+    mbedtls_md_type_t mgf = md_from_oid(v, vl, false);
+    if (mgf == MBEDTLS_MD_NONE) {
+        return false;
+    }
+    int salt = 20;
+    if (der_rd_peek(&p) == 0xA2) {
+        der_rd_t srd;
+        if (!der_rd_enter(&p, 0xA2, &srd) || !der_rd_next(&srd, &tag, &v, &vl, NULL, NULL) || tag != 0x02 || vl != 1 ||
+            (v[0] & 0x80)) {
+            return false;
+        }
+        salt = v[0];
+    } /* sonst Default 20 */
+    if (der_rd_peek(&p) == 0xA3) {   /* trailerField muss 1 sein */
+        der_rd_t trd;
+        if (!der_rd_enter(&p, 0xA3, &trd) || !der_rd_next(&trd, &tag, &v, &vl, NULL, NULL) || tag != 0x02 || vl != 1 ||
+            v[0] != 1) {
+            return false;
+        }
+    }
+    if (!der_rd_done(&p)) {
+        return false;
+    }
+    mbedtls_pk_rsassa_pss_options opt = {.mgf1_hash_id = mgf, .expected_salt_len = salt};
+    return mbedtls_pk_verify_ext(MBEDTLS_PK_RSASSA_PSS, &opt, pk, md, hash, hash_len, sig, sig_len) == 0;
+}
+
 esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time)
 {
     esp_err_t err = ASICS_ERR_TSA_INVALID;
@@ -111,7 +184,10 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
     }
     attrs.p = v;
     attrs.end = v + vl;
-    if (!der_rd_enter(&si, 0x30, &sigalg)) {
+    const uint8_t *sigalg_oid;
+    size_t sigalg_oid_len;
+    if (!der_rd_enter(&si, 0x30, &sigalg) || !der_rd_next(&sigalg, &tag, &sigalg_oid, &sigalg_oid_len, NULL, NULL) ||
+        tag != 0x06) {
         FAIL("SignerInfo: signatureAlgorithm defekt");
     }
     const uint8_t *sig;
@@ -219,9 +295,11 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
     attrs_copy[0] = 0x31;
     uint8_t dg[64];
     size_t dgl;
-    if (!md_hash(md, attrs_copy, attrs_tlen, dg, &dgl) ||
-        mbedtls_pk_verify(&tsa->pk, md, dg, dgl, sig, sig_len) != 0) {
-        FAIL("TSA-Signatur ungueltig");
+    if (!md_hash(md, attrs_copy, attrs_tlen, dg, &dgl)) {
+        FAIL("TSA-Signatur: Hash nicht berechenbar");
+    }
+    if (!verify_signature(&tsa->pk, md, sigalg_oid, sigalg_oid_len, &sigalg, dg, dgl, sig, sig_len)) {
+        FAIL("TSA-Signatur ungueltig oder Signaturalgorithmus nicht unterstuetzt");
     }
 
     /* --- Zertifikatspruefung --- */

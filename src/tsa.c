@@ -77,7 +77,8 @@ static esp_err_t fetch_token(tsa_hook_ctx_t *c, const uint8_t *sig, size_t sig_l
     tsa_token_t t;
     time_t gen_time;
     tsa_expect_t e = {.digest = digest, .nonce = nonce, .nonce_len = sizeof(nonce), .now = c->now,
-                      .tolerance_s = CONFIG_ASICS_TSA_GENTIME_TOLERANCE_S};
+                      .tolerance_s = CONFIG_ASICS_TSA_GENTIME_TOLERANCE_S,
+                      .policy_oid = CONFIG_ASICS_TSA_POLICY_OID};
     if ((err = tsa_parse_response(c->resp, resp_len, &r)) != ESP_OK ||
         (err = tsa_parse_token(r.token, r.token_len, &t)) != ESP_OK ||
         (err = tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gen_time)) != ESP_OK ||

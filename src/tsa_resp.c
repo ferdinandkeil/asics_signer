@@ -2,10 +2,12 @@
  * SPDX-FileCopyrightText: 2026 Ferdinand Keil
  * SPDX-License-Identifier: MIT
  */
+#include <stdlib.h>
 #include <string.h>
 #include "tsa_resp.h"
 #include "asics_signer.h"
 #include "esp_log.h"
+#include "mbedtls/oid.h"
 #include "asn1_oids.h"
 
 static const char *TAG = "asics_tsa";
@@ -159,6 +161,17 @@ esp_err_t tsa_check_tstinfo(const uint8_t *tstinfo, size_t len, const tsa_expect
     }
     if (!der_rd_next(&r, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {           /* policy */
         INVALID("TSTInfo: policy fehlt");
+    }
+    if (e->policy_oid && e->policy_oid[0]) {   /* konfigurierte Policy muss exakt uebereinstimmen */
+        mbedtls_asn1_buf want = {0};
+        if (mbedtls_oid_from_numeric_string(&want, e->policy_oid, strlen(e->policy_oid)) != 0) {
+            INVALID("konfigurierte Policy-OID ungueltig");
+        }
+        bool same = want.len == vl && memcmp(want.p, v, vl) == 0;
+        free(want.p);
+        if (!same) {
+            INVALID("TSTInfo: policy stimmt nicht mit der konfigurierten Policy ueberein");
+        }
     }
     if (!der_rd_enter(&r, 0x30, &mi) || !der_rd_enter(&mi, 0x30, &alg) ||
         !der_rd_next(&alg, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {

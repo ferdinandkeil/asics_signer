@@ -280,7 +280,8 @@ static void test_tsa_verify_negative(void)
 }
 
 /* Eigene Token per openssl cms -sign (TSTInfo der Test-TSA, anderes Signaturzertifikat) */
-static size_t cms_token(const exch_t *x, const char *cert, const char *key, uint8_t *out, size_t cap)
+static size_t cms_token_ex(const exch_t *x, const char *cert, const char *key, const char *md, const char *extra,
+                           uint8_t *out, size_t cap)
 {
     tsa_resp_t r;
     tsa_token_t t;
@@ -296,8 +297,8 @@ static size_t cms_token(const exch_t *x, const char *cert, const char *key, uint
     fclose(f);
     snprintf(cmd, sizeof(cmd),
              "openssl cms -sign -binary -nodetach -outform DER -in %s -econtent_type 1.2.840.113549.1.9.16.1.4 "
-             "-signer %s/%s -inkey %s/%s -certfile %s/tsa_root.pem -md sha256 -cades -out %s 2>/dev/null",
-             in, pki, cert, pki, key, pki, tok);
+             "-signer %s/%s -inkey %s/%s -certfile %s/tsa_root.pem -md %s %s -cades -out %s 2>/dev/null",
+             in, pki, cert, pki, key, pki, md, extra, tok);
     TEST_ASSERT_EQUAL(0, system(cmd));
     f = fopen(tok, "rb");
     size_t n = fread(out, 1, cap, f);
@@ -307,10 +308,19 @@ static size_t cms_token(const exch_t *x, const char *cert, const char *key, uint
     return n;
 }
 
-static esp_err_t verify_custom(const exch_t *x, const char *cert, const char *key)
+static size_t cms_token(const exch_t *x, const char *cert, const char *key, uint8_t *out, size_t cap)
+{
+    return cms_token_ex(x, cert, key, "sha256", "", out, cap);
+}
+
+typedef void (*tok_mut_t)(uint8_t *tok, size_t n);
+
+static esp_err_t verify_custom_ex(const exch_t *x, const char *cert, const char *key, const char *md, const char *extra,
+                                  tok_mut_t mut)
 {
     static uint8_t tok[8192];
-    size_t n = cms_token(x, cert, key, tok, sizeof(tok));
+    size_t n = cms_token_ex(x, cert, key, md, extra, tok, sizeof(tok));
+    if (mut) mut(tok, n);
     tsa_token_t t;
     TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(tok, n, &t));
     size_t cl;
@@ -318,6 +328,11 @@ static esp_err_t verify_custom(const exch_t *x, const char *cert, const char *ke
     esp_err_t e = tsa_verify_token(&t, ca, cl, time(NULL));
     free(ca);
     return e;
+}
+
+static esp_err_t verify_custom(const exch_t *x, const char *cert, const char *key)
+{
+    return verify_custom_ex(x, cert, key, "sha256", "", NULL);
 }
 
 static void test_tsa_verify_certificates(void)
@@ -632,6 +647,75 @@ static void test_tsa_host_safe_args(void)
     asics_tsa_host_set_section("tsa_good");
 }
 
+/* signatureAlgorithm des letzten SignerInfo (letztes Vorkommen der ecdsa-with-SHA256-OID im Token) aendern */
+static void mut_sigalg_sha384(uint8_t *tok, size_t n)
+{
+    static const uint8_t oid[] = {0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02};
+    for (size_t i = n - sizeof(oid); i > 0; i--) {
+        if (!memcmp(tok + i, oid, sizeof(oid))) { tok[i + 9] = 0x03; return; }
+    }
+    TEST_FAIL_MESSAGE("sigAlg-OID nicht gefunden");
+}
+static void mut_sigalg_unknown(uint8_t *tok, size_t n)
+{
+    static const uint8_t oid[] = {0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02};
+    for (size_t i = n - sizeof(oid); i > 0; i--) {
+        if (!memcmp(tok + i, oid, sizeof(oid))) { tok[i + 9] = 0x7F; return; }
+    }
+    TEST_FAIL_MESSAGE("sigAlg-OID nicht gefunden");
+}
+
+/* Signaturalgorithmen: ECDSA (SHA-256/384), RSA PKCS#1 v1.5, RSASSA-PSS; unbekannte/unpassende -> INVALID */
+static void test_tsa_verify_sigalgs(void)
+{
+    exch_t x;
+    exchange(&x, 0x6C);
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom_ex(&x, "tsa.pem", "tsa.key", "sha384", "", NULL));            /* ecdsa-with-SHA384 */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom_ex(&x, "tsa_rsa.pem", "tsa_rsa.key", "sha384", "", NULL));    /* RSA v1.5, SHA-384 */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom_ex(&x, "tsa_rsa.pem", "tsa_rsa.key", "sha256",
+        "-keyopt rsa_padding_mode:pss -keyopt rsa_pss_saltlen:32 -keyopt rsa_mgf1_md:sha256", NULL));      /* PSS, SHA-256 */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom_ex(&x, "tsa_rsa.pem", "tsa_rsa.key", "sha384",
+        "-keyopt rsa_padding_mode:pss -keyopt rsa_pss_saltlen:48 -keyopt rsa_mgf1_md:sha384", NULL));      /* PSS, SHA-384 */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom_ex(&x, "tsa_rsa.pem", "tsa_rsa.key", "sha256",
+        "-keyopt rsa_padding_mode:pss -keyopt rsa_pss_saltlen:20 -keyopt rsa_mgf1_md:sha256", NULL));      /* PSS, andere Salt-Laenge */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom_ex(&x, "tsa.pem", "tsa.key", "sha256", "", mut_sigalg_sha384));
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom_ex(&x, "tsa.pem", "tsa.key", "sha256", "", mut_sigalg_unknown));
+}
+
+/* Policy: konfigurierte OID muss exakt mit TSTInfo.policy uebereinstimmen */
+static void test_tsa_policy_check(void)
+{
+    exch_t x;
+    exchange(&x, 0x6D);
+    tsa_resp_t r;
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x.resp, x.resp_len, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    time_t gt;
+    tsa_expect_t e = expect_of(&x, time(NULL), 300);
+    e.policy_oid = "1.2.3.4.5";                       /* default_policy der Test-TSA */
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e.policy_oid = "";
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e.policy_oid = "1.2.3.4.6";
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e.policy_oid = "1.2.3.4";                         /* Praefix darf nicht passen */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e.policy_oid = "keine.oid";
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    /* Anfrage mit anderer (erlaubter) Policy: die Antwort traegt diese Policy */
+    uint8_t req[160], resp[4096];
+    size_t rl, rn;
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_build_request(x.digest, x.nonce, "1.2.3.4.6", req, sizeof(req), &rl));
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, resp, sizeof(resp), &rn));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(resp, rn, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    e.policy_oid = "1.2.3.4.6";
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e.policy_oid = "1.2.3.4.5";
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -644,6 +728,8 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_verify_good);
     RUN_TEST(test_tsa_verify_negative);
     RUN_TEST(test_tsa_verify_certificates);
+    RUN_TEST(test_tsa_verify_sigalgs);
+    RUN_TEST(test_tsa_policy_check);
     RUN_TEST(test_tsa_sign_modes_ok);
     RUN_TEST(test_tsa_sign_faults);
     RUN_TEST(test_tsa_mode_api);
