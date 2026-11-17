@@ -41,6 +41,12 @@ verify() {
 verify sample.asics "$pki/ca.pem"
 verify sample_chain.asics "$pki/root.pem"     # Geraet + Issuing + Intermediate + Root
 verify sample_chain3.asics "$pki/root.pem"    # Geraet + Issuing + Intermediate (Root nur als Anker)
+verify sample_tsa.asics "$pki/ca.pem"         # CAdES-B-T (PREFERRED): openssl prueft die CMS-Signatur
+verify sample_tsa_required.asics "$pki/ca.pem"
+for f in sample_tsa.asics sample_tsa_required.asics; do
+  unzip -p "$f" META-INF/signature.p7s | openssl cms -cmsout -print -inform DER | grep -q "signatureTimeStampToken\|id-smime-aa-timeStampToken" \
+    || { echo "FEHLER: $f enthaelt kein signature-time-stamp"; exit 1; }
+done
 
 echo "== openssl ts -query (TimeStampReq der Komponente)"
 openssl ts -query -in tsa_request.tsq -text | tee tsa_request.txt
@@ -60,6 +66,13 @@ echo "== EU-DSS-Validierung (tools/verify_dss.sh)"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   "$repo/tools/verify_dss.sh" sample.asics "$pki/ca.pem"   # Fehlschlag bricht ab (set -e)
   echo "DSS: sample.asics TOTAL_PASSED"
+  # B-T-Container: zwei Vertrauensanker (Geraete-CA und TSA-Root); Format muss CAdES-BASELINE-T sein
+  for c in sample_tsa.asics sample_tsa_required.asics; do
+    "$repo/tools/verify_dss.sh" "$c" "$pki/ca.pem" "$pki/tsa_root.pem" | tee "dss_$c.txt"
+    grep -q "Format:         CAdES-BASELINE-T" "dss_$c.txt" && grep -q "Ergebnis:       TOTAL_PASSED" "dss_$c.txt" \
+      || { echo "FEHLER: DSS meldet fuer $c nicht CAdES-BASELINE-T + TOTAL_PASSED"; exit 1; }
+    echo "DSS: $c CAdES-BASELINE-T TOTAL_PASSED"
+  done
   # Kettencontainer gegen die Root als Vertrauensanker; Fehlschlag bricht ab (set -e)
   for c in sample_chain.asics sample_chain3.asics; do
     "$repo/tools/verify_dss.sh" "$c" "$pki/root.pem"

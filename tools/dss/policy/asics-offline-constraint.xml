@@ -376,8 +376,8 @@
 				<Signature Level="FAIL" />
 				<NotExpired Level="FAIL" />
 				<SunsetDate Level="FAIL" />
-				<RevocationDataAvailable Level="FAIL" />
-				<AcceptableRevocationDataFound Level="FAIL" />
+				<RevocationDataAvailable Level="WARN" /> <!-- ASICS-OFFLINE: war FAIL -->
+				<AcceptableRevocationDataFound Level="WARN" /> <!-- ASICS-OFFLINE: war FAIL -->
 				<CRLNextUpdatePresent Level="WARN" />
 				<RevocationFreshness Level="IGNORE" Unit="DAYS" Value="0" />
 				<ExtendedKeyUsage Level="FAIL">

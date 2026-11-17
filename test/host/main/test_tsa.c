@@ -357,13 +357,13 @@ static const uint8_t OID_STS[] = {0x06, 0x0B, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D
 
 static void test_tsa_sign_modes_ok(void)
 {
-    static const uint8_t data[] = "a;b\n1;2\n";
+    static const uint8_t data[] = "zeit;wert\n2026-01-15T12:00:00Z;42,5\n";   /* = messung.csv der Ende-zu-Ende-Tests */
     asics_sign_result_t res;
     for (int pass = 0; pass < 2; pass++) {
         tsa_setup(pass ? ASICS_TSA_REQUIRED : ASICS_TSA_PREFERRED);
         sink_t s = {0};
         TEST_ASSERT_EQUAL(pass ? ASICS_TSA_REQUIRED : ASICS_TSA_PREFERRED, asics_get_tsa_mode());
-        TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+        TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("messung.csv", data, sizeof(data) - 1, sink_write, &s, &res));
         TEST_ASSERT_EQUAL(ASICS_LEVEL_B_T, res.level);
         TEST_ASSERT_EQUAL(ESP_OK, res.tsa_err);
         TEST_ASSERT_TRUE(llabs((long long)(res.tsa_gen_time - time(NULL))) < 10);

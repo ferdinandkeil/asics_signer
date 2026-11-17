@@ -62,7 +62,14 @@ signing-certificate-v2-Bindung (Signatur <-> Gerätezertifikat) erzwungen wird:
 
 `CertDigestPresent` und `CertDigestMatch` stehen im Default bereits auf FAIL. `KeyIdentifierMatch` bleibt WARN
 (betrifft die SignerIdentifier-Form, nicht die signing-certificate-v2-Referenz). Die Änderungen im
-Counter-Signature- und Timestamp-Abschnitt wurden nicht vorgenommen (für B-B ohne Belang).
+Counter-Signature-Abschnitt wurde nicht verändert.
+
+Im Abschnitt `Timestamp` (Signaturzeitstempel der B-T-Container) sind `RevocationDataAvailable` und
+`AcceptableRevocationDataFound` des **TSA-Signerzertifikats** (`Timestamp/BasicSignatureConstraints/SigningCertificate`)
+ebenfalls FAIL -> WARN (`<!-- ASICS-OFFLINE: war FAIL -->`): Eine TSA-Signatur wird offline ohne Sperrdaten geprüft, sonst
+INDETERMINATE. Die CA-Zertifikate der TSA-Kette sind dort im Default bereits WARN. Der Zeitstempel selbst
+(`MessageImprintDataFound/Intact`, Signatur, EKU, Kette zur `--trust`-Wurzel) wird weiterhin hart geprüft.
+Für B-T-Container sind **zwei** Vertrauensanker nötig (Geräte-CA und TSA-Root): `--trust` mehrfach angeben.
 
 Bewusst unverändert: `RevocationFreshness` (Default bereits IGNORE), `NotRevoked`/`NotOnHold` (FAIL, greifen,
 sobald Sperrdaten vorliegen), die übrigen CA-Zertifikat-Constraints (u. a. `NotExpired`, CA-Flag, Signatur),
