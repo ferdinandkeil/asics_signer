@@ -23,34 +23,55 @@ static const char *TAG = "asics";
 static bool s_inited;
 
 #if CONFIG_ASICS_TSA_DEFAULT_REQUIRED
-static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_REQUIRED;
+static asics_tsa_mode_t s_tsa_default = ASICS_TSA_REQUIRED;
 #elif CONFIG_ASICS_TSA_DEFAULT_PREFERRED
-static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_PREFERRED;
+static asics_tsa_mode_t s_tsa_default = ASICS_TSA_PREFERRED;
 #else
-static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_OFF;
+static asics_tsa_mode_t s_tsa_default = ASICS_TSA_OFF;
 #endif
+static asics_tsa_mode_t s_tsa_mode = ASICS_TSA_OFF;   /* effektiver Modus; beim ersten Zugriff = Default */
+static bool s_tsa_mode_set;
 
-void asics_set_tsa_mode(asics_tsa_mode_t mode)
+esp_err_t asics_set_tsa_mode(asics_tsa_mode_t mode)
 {
-    s_tsa_mode = mode;
+    if ((int)mode < ASICS_TSA_DEFAULT || (int)mode > ASICS_TSA_REQUIRED) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_tsa_mode = mode == ASICS_TSA_DEFAULT ? s_tsa_default : mode;
+    s_tsa_mode_set = true;
+    return ESP_OK;
 }
+
+#if CONFIG_IDF_TARGET_LINUX
+/* Nur Host-Test: Kconfig-Default ersetzen (und effektiven Modus zuruecksetzen) */
+void asics_host_set_tsa_default(asics_tsa_mode_t mode)
+{
+    s_tsa_default = mode;
+    s_tsa_mode_set = false;
+}
+#endif
 
 asics_tsa_mode_t asics_get_tsa_mode(void)
 {
+    if (!s_tsa_mode_set) {
+        s_tsa_mode = s_tsa_default;
+        s_tsa_mode_set = true;
+    }
     return s_tsa_mode;
 }
 
 esp_err_t asics_signer_init(const asics_config_t *cfg)
 {
+    if (cfg && ((int)cfg->tsa_mode < ASICS_TSA_DEFAULT || (int)cfg->tsa_mode > ASICS_TSA_REQUIRED)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     esp_err_t err = asics_key_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Backend-Init: %s", esp_err_to_name(err));
         return err;
     }
     s_inited = true;
-    if (cfg) {
-        s_tsa_mode = cfg->tsa_mode;
-    }
+    asics_set_tsa_mode(cfg ? cfg->tsa_mode : ASICS_TSA_DEFAULT);   /* DEFAULT = Kconfig-Default */
     if (cfg && cfg->device_serial) {
         err = asics_provision_set_serial(cfg->device_serial);
         if (err != ESP_OK) {
@@ -114,7 +135,8 @@ esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t le
         return ESP_ERR_NO_MEM;
     }
     mbedtls_x509_crt_init(dev_crt);
-    tsa_hook_ctx_t tsa = {.mode = s_tsa_mode, .now = now, .err = ESP_OK};
+    asics_tsa_mode_t mode = asics_get_tsa_mode();
+    tsa_hook_ctx_t tsa = {.mode = mode, .now = now, .err = ESP_OK};
     uint8_t *blob = mem, *cms = mem + ASICS_CERT_BLOB_MAX;
     cades_params_t p = {.signing_time = now, .sign = asics_key_sign_adapter};
     asics_der_t refs[CONFIG_ASICS_MAX_CHAIN];
@@ -142,7 +164,7 @@ esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t le
     p.dev_crt = dev_crt;
     p.ca_certs = &refs[1];
     p.ca_count = cnt - 1;
-    if (s_tsa_mode != ASICS_TSA_OFF) {
+    if (mode != ASICS_TSA_OFF) {
         tsa.resp = malloc(CONFIG_ASICS_TSA_MAX_RESP);
         if (!tsa.resp) {
             err = ESP_ERR_NO_MEM;

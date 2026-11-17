@@ -136,11 +136,11 @@ static int cmd_tsa_mode(int argc, char **argv)
     if (argc == 2) {
         for (int i = 0; i < 3; i++) {
             if (strcmp(argv[1], names[i]) == 0) {
-                asics_set_tsa_mode((asics_tsa_mode_t)i);
+                asics_set_tsa_mode((asics_tsa_mode_t)(i + 1));   /* 0 = DEFAULT */
             }
         }
     }
-    printf("tsa-mode: %s\n", names[asics_get_tsa_mode()]);
+    printf("tsa-mode: %s\n", names[asics_get_tsa_mode() - 1]);
     return 0;
 }
 

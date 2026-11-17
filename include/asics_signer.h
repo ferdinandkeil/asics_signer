@@ -63,7 +63,8 @@ typedef enum {
 
 /** TSA-Modus (RFC-3161-Zeitstempel, CAdES-B-T). Nur im RAM, nicht persistent. */
 typedef enum {
-    ASICS_TSA_OFF = 0,      /**< kein Zeitstempel: reines CAdES-B-B */
+    ASICS_TSA_DEFAULT = 0,  /**< nur als Eingabe: Kconfig-Default verwenden (asics_get_tsa_mode() liefert nie DEFAULT) */
+    ASICS_TSA_OFF,          /**< kein Zeitstempel: reines CAdES-B-B */
     ASICS_TSA_PREFERRED,    /**< Zeitstempel versuchen; bei Fehler als B-B ausgeben (Ergebnis in asics_sign_result_t) */
     ASICS_TSA_REQUIRED,     /**< Zeitstempel erforderlich: bei Fehler nicht signieren, Fehlercode zurueckgeben */
 } asics_tsa_mode_t;
@@ -86,8 +87,8 @@ typedef struct {
     /** Kundenspezifische Seriennummer fuer das CSR-Feld serialNumber
      *  (max. 64 Zeichen, PrintableString-Zeichensatz). NULL/leer = weglassen. */
     const char *device_serial;
-    /** TSA-Modus. Wird bei asics_signer_init(cfg != NULL) uebernommen (ein nullinitialisiertes cfg
-     *  setzt also OFF); bei cfg == NULL gilt der Kconfig-Default. Spaeter: asics_set_tsa_mode(). */
+    /** TSA-Modus. ASICS_TSA_DEFAULT (0, auch bei nullinitialisiertem cfg und bei cfg == NULL) = Kconfig-Default;
+     *  OFF/PREFERRED/REQUIRED setzen ihn explizit. Spaeter aenderbar mit asics_set_tsa_mode(). */
     asics_tsa_mode_t tsa_mode;
 } asics_config_t;
 
@@ -120,10 +121,11 @@ asics_state_t asics_signer_get_state(void);
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
                      asics_write_cb_t write, void *ctx);
 
-/** Setzt den TSA-Modus (nur RAM, nicht persistent). */
-void asics_set_tsa_mode(asics_tsa_mode_t mode);
+/** Setzt den TSA-Modus (nur RAM, nicht persistent). ASICS_TSA_DEFAULT setzt den Kconfig-Default.
+ *  Ungueltige Werte: ESP_ERR_INVALID_ARG (Modus bleibt unveraendert). */
+esp_err_t asics_set_tsa_mode(asics_tsa_mode_t mode);
 
-/** Liefert den aktuellen TSA-Modus. */
+/** Liefert den effektiven TSA-Modus (OFF, PREFERRED oder REQUIRED, nie DEFAULT). */
 asics_tsa_mode_t asics_get_tsa_mode(void);
 
 /**

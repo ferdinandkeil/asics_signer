@@ -531,11 +531,32 @@ static void test_tsa_sign_faults(void)
  * zusaetzlich: Modus-API und Default */
 static void test_tsa_mode_api(void)
 {
-    asics_set_tsa_mode(ASICS_TSA_REQUIRED);
-    TEST_ASSERT_EQUAL(ASICS_TSA_REQUIRED, asics_get_tsa_mode());
-    asics_set_tsa_mode(ASICS_TSA_OFF);
+    /* Kconfig-Default PREFERRED: DEFAULT/NULL/nullinitialisiertes cfg behalten ihn, explizites OFF ueberschreibt */
+    asics_host_set_tsa_default(ASICS_TSA_PREFERRED);
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(NULL));
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    asics_config_t zero = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(&zero));
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(&(asics_config_t){.tsa_mode = ASICS_TSA_OFF}));
     TEST_ASSERT_EQUAL(ASICS_TSA_OFF, asics_get_tsa_mode());
-    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(NULL));        /* cfg == NULL: Kconfig-Default (OFF) */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(&zero));                 /* DEFAULT stellt den Default wieder her */
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    /* Setter */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_set_tsa_mode(ASICS_TSA_REQUIRED));
+    TEST_ASSERT_EQUAL(ASICS_TSA_REQUIRED, asics_get_tsa_mode());
+    TEST_ASSERT_EQUAL(ESP_OK, asics_set_tsa_mode(ASICS_TSA_DEFAULT));
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, asics_set_tsa_mode((asics_tsa_mode_t)99));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, asics_set_tsa_mode((asics_tsa_mode_t)-1));
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());        /* unveraendert */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, asics_signer_init(&(asics_config_t){.tsa_mode = (asics_tsa_mode_t)42}));
+    TEST_ASSERT_EQUAL(ASICS_TSA_PREFERRED, asics_get_tsa_mode());
+    /* Default REQUIRED / OFF */
+    asics_host_set_tsa_default(ASICS_TSA_REQUIRED);
+    TEST_ASSERT_EQUAL(ASICS_TSA_REQUIRED, asics_get_tsa_mode());
+    asics_host_set_tsa_default(ASICS_TSA_OFF);
     TEST_ASSERT_EQUAL(ASICS_TSA_OFF, asics_get_tsa_mode());
 }
 

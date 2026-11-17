@@ -210,7 +210,7 @@ A complete example is in [`examples/basic_sign`](examples/basic_sign) (`idf.py s
 which turns the signature into **CAdES-B-T**. The mode is chosen at run time:
 
 ```c
-typedef enum { ASICS_TSA_OFF, ASICS_TSA_PREFERRED, ASICS_TSA_REQUIRED } asics_tsa_mode_t;
+typedef enum { ASICS_TSA_DEFAULT, ASICS_TSA_OFF, ASICS_TSA_PREFERRED, ASICS_TSA_REQUIRED } asics_tsa_mode_t;
 
 asics_set_tsa_mode(ASICS_TSA_PREFERRED);       /* RAM only, not persisted */
 
@@ -225,8 +225,11 @@ esp_err_t err = asics_sign_ex("record.csv", csv, csv_len, write_cb, ctx, &res);
 | `ASICS_TSA_PREFERRED` | try the time stamp; on any TSA error produce a B-B container, return `ESP_OK`, `res.level = ASICS_LEVEL_B_B`, `res.tsa_err` = reason |
 | `ASICS_TSA_REQUIRED` | on any TSA error produce **no** container and make **no** write-callback call; the error code is returned |
 
-The initial mode comes from Kconfig (default `OFF`), or from `asics_config_t.tsa_mode` when
-`asics_signer_init()` gets a non-NULL config (a zero-initialised config therefore selects `OFF`).
+The initial mode is the Kconfig default (`OFF` unless configured otherwise). `ASICS_TSA_DEFAULT` (value 0)
+means "use the Kconfig default": it is what `asics_signer_init(NULL)` and a zero-initialised
+`asics_config_t.tsa_mode` select, and `asics_set_tsa_mode(ASICS_TSA_DEFAULT)` restores it, while `OFF`,
+`PREFERRED` and `REQUIRED` override it explicitly. `asics_get_tsa_mode()` always returns the effective mode
+(never `DEFAULT`); invalid values are rejected with `ESP_ERR_INVALID_ARG`.
 `asics_sign()` is unchanged and equals `asics_sign_ex(..., NULL)`. Error codes:
 `ASICS_ERR_TSA_UNAVAILABLE` (network, timeout, HTTP error, no URL or no TSA CA configured),
 `ASICS_ERR_TSA_REJECTED` (PKIStatus is neither granted nor grantedWithMods) and `ASICS_ERR_TSA_INVALID`

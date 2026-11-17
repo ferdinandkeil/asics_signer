@@ -5,7 +5,11 @@
 /* Nur Host-Build: Testhilfen fuer den TSA-Transport. */
 #pragma once
 
+#include "asics_signer.h"
 #include "tsa_transport.h"
+
+/** Nur Host-Test: Kconfig-Default des TSA-Modus ersetzen (setzt den effektiven Modus zurueck). */
+void asics_host_set_tsa_default(asics_tsa_mode_t mode);
 
 /** Test-Hook: ersetzt den Transport vollstaendig (NULL = Standard: openssl ts -reply). */
 typedef esp_err_t (*asics_tsa_host_hook_t)(const uint8_t *req, size_t req_len, uint8_t *resp, size_t resp_size,
