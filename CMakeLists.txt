@@ -5,7 +5,9 @@ set(srcs
     "src/asics_container.c"
     "src/zip_writer.c"
     "src/der_writer.c"
-    "src/cades_builder.c")
+    "src/cades_builder.c"
+    "src/backend/backend_nvs.c"
+    "src/backend/backend_se_stub.c")
 
 if(target STREQUAL "linux")
     # --- Host-Build (Linux-Target, nur fuer Unit-Tests) ----------------------
@@ -19,15 +21,16 @@ if(target STREQUAL "linux")
         set_source_files_properties(${mbed_srcs} PROPERTIES COMPILE_OPTIONS "-w")
     endif()
     idf_component_register(
-        SRCS ${srcs} ${mbed_srcs}
+        SRCS ${srcs} "src/kv_ram.c" ${mbed_srcs}
         INCLUDE_DIRS "include" "${mbed_dir}/include"
-        PRIV_INCLUDE_DIRS "src" "${mbed_dir}/library"
+        PRIV_INCLUDE_DIRS "src" "src/backend" "${mbed_dir}/library"
         PRIV_REQUIRES esp_rom esp_hw_support log)
 else()
+    set(priv_srcs "src/kv_nvs.c")
     idf_component_register(
-        SRCS ${srcs}
+        SRCS ${srcs} ${priv_srcs}
         INCLUDE_DIRS "include"
-        PRIV_INCLUDE_DIRS "src"
+        PRIV_INCLUDE_DIRS "src" "src/backend"
         REQUIRES esp_common
         PRIV_REQUIRES mbedtls nvs_flash esp_rom esp_hw_support bootloader_support console log)
 endif()

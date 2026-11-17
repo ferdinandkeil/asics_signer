@@ -6,6 +6,7 @@
 
 void run_zip_tests(void);
 void run_cades_tests(void);
+void run_csr_tests(void);
 
 esp_err_t sink_write(const void *buf, size_t len, void *ctx)
 {
@@ -80,6 +81,7 @@ void app_main(void)
     UNITY_BEGIN();
     run_zip_tests();
     run_cades_tests();
+    run_csr_tests();
     int fails = UNITY_END();
     exit(fails ? 1 : 0);
 }

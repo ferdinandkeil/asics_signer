@@ -1,5 +1,52 @@
 menu "ASiC-S Signer"
 
+    choice ASICS_KEY_BACKEND
+        prompt "Schluessel-Backend"
+        default ASICS_KEY_BACKEND_NVS
+        help
+            Legt fest, wo der private ECDSA-P-256-Schluessel liegt. Der private
+            Schluessel verlaesst das Backend nie.
+
+        config ASICS_KEY_BACKEND_NVS
+            bool "Light: Schluessel im (verschluesselten) NVS"
+            help
+                Schluessel wird im NVS abgelegt. Gedacht fuer verschluesseltes NVS
+                (nvs_keys-Schema, abgesichert durch Flash Encryption) und Secure Boot v2.
+
+        config ASICS_KEY_BACKEND_SE_STUB
+            bool "Externes Secure Element / TPM 2.0 (Stub, nicht implementiert)"
+            help
+                Platzhalter mit identischer Schnittstelle; liefert ESP_ERR_NOT_SUPPORTED.
+    endchoice
+
+    config ASICS_NVS_PARTITION
+        string "NVS-Partition"
+        default "nvs"
+        help
+            Name der NVS-Partition. Muss von der Anwendung initialisiert werden
+            (nvs_flash_init bzw. nvs_flash_secure_init).
+
+    config ASICS_NVS_NAMESPACE
+        string "NVS-Namespace"
+        default "asics"
+
+    config ASICS_BOOTLOADER_RANDOM
+        bool "bootloader_random_enable() um die Schluesselerzeugung (nur ESP32-Familie)"
+        default y
+        help
+            Der ESP32-RNG liefert nur bei aktivem WLAN/Bluetooth oder aktivierter
+            Rauschquelle echte Zufallszahlen. Diese Option schaltet fuer die Dauer
+            der Schluesselerzeugung die Rauschquelle ein. Abschalten, falls der ADC
+            anderweitig belegt ist oder RF garantiert aktiv ist.
+
+    config ASICS_REQUIRE_FLASH_ENCRYPTION
+        bool "Schluesselerzeugung nur bei aktiver Flash Encryption erlauben"
+        default y
+        depends on ASICS_KEY_BACKEND_NVS
+        help
+            Schuetzt den NVS-abgelegten Schluessel. Fuer Entwicklungsaufbauten
+            abschalten (es wird eine Warnung protokolliert).
+
     config ASICS_CMS_BUF_SIZE
         int "Puffergroesse fuer die CMS-Signatur (Bytes, Heap)"
         default 5120
