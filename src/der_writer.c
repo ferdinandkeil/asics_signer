@@ -72,6 +72,29 @@ void der_int_raw(der_t *d, const uint8_t *content, size_t len)
     der_wrap(d, mark, MBEDTLS_ASN1_INTEGER);
 }
 
+void der_bool(der_t *d, bool v)
+{
+    if (d->err) {
+        return;
+    }
+    check(d, mbedtls_asn1_write_bool(&d->p, d->start, v));
+}
+
+void der_uint_be(der_t *d, const uint8_t *be, size_t len)
+{
+    while (len > 1 && be[0] == 0) { /* minimale Kodierung */
+        be++;
+        len--;
+    }
+    size_t mark = der_size(d);
+    der_raw(d, be, len);
+    if (len == 0 || (be[0] & 0x80)) { /* positiv halten */
+        uint8_t z = 0;
+        der_raw(d, &z, 1);
+    }
+    der_wrap(d, mark, MBEDTLS_ASN1_INTEGER);
+}
+
 void der_octet_string(der_t *d, const uint8_t *data, size_t len)
 {
     size_t mark = der_size(d);

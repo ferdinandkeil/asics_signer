@@ -42,6 +42,12 @@ verify sample.asics "$pki/ca.pem"
 verify sample_chain.asics "$pki/root.pem"     # Geraet + Issuing + Intermediate + Root
 verify sample_chain3.asics "$pki/root.pem"    # Geraet + Issuing + Intermediate (Root nur als Anker)
 
+echo "== openssl ts -query (TimeStampReq der Komponente)"
+openssl ts -query -in tsa_request.tsq -text | tee tsa_request.txt
+grep -q "Version: 1" tsa_request.txt && grep -q "Hash Algorithm: sha256" tsa_request.txt && \
+  grep -q "Nonce: 0x0102030405060708" tsa_request.txt && grep -q "Certificate required: yes" tsa_request.txt && \
+  grep -q "Policy OID: 1.2.3.4" tsa_request.txt || { echo "FEHLER: TimeStampReq nicht wie erwartet"; exit 1; }
+
 echo "== openssl req -verify"
 openssl req -verify -noout -in device.csr.pem
 
