@@ -6,6 +6,7 @@
 #   Kette:          root.pem -> inter.pem -> issuing.pem -> dev_chain.pem
 #   Geraeteschluessel dev.key (fuer dev.pem und dev_chain.pem identisch)
 #   other.pem:      Zertifikat zu einem anderen Schluessel (Negativtest)
+#   longca.pem/medca.pem + dev_longdn.pem/dev_meddn.pem: CAs mit sehr langem bzw. mittlerem Issuer-DN (Puffertests)
 #   leaf_ca.pem:    Zertifikat OHNE CA-Flag, ausgestellt von der Test-CA (Negativtest CA-Flag)
 # Aufruf: gen_test_pki.sh <ausgabeverzeichnis>
 set -euo pipefail
@@ -27,6 +28,13 @@ unique_subject = no
 copy_extensions = none
 [pol]
 commonName = supplied
+[pol_any]
+countryName = optional
+stateOrProvinceName = optional
+localityName = optional
+organizationName = optional
+organizationalUnitName = optional
+commonName = supplied
 [ext_ca]
 basicConstraints = critical,CA:TRUE
 keyUsage = critical,keyCertSign,cRLSign
@@ -46,10 +54,10 @@ CNF
 mkkey() { openssl ecparam -name prime256v1 -genkey -noout -out "$1.key"; }
 newdb() { mkdir "db_$1"; : > "db_$1/index.txt"; echo "$2" > "db_$1/serial"; }
 
-# issue <ausstellername> <ausstellerzert|""> <csr> <ext> <out>   (leer = selbstsigniert)
+# issue <ausstellername> <ausstellerzert|""> <csr> <ext> <out> [policy]   (leer = selbstsigniert)
 issue() {
-  local issuer="$1" issuer_pem="$2" csr="$3" ext="$4" outpem="$5"
-  local args=(-batch -config ca.cnf -keyfile "$issuer.key" -in "$csr" -extensions "$ext"
+  local issuer="$1" issuer_pem="$2" csr="$3" ext="$4" outpem="$5" policy="${6:-pol}"
+  local args=(-batch -config ca.cnf -policy "$policy" -keyfile "$issuer.key" -in "$csr" -extensions "$ext"
               -startdate 20240101000000Z -enddate 20440101000000Z -notext -out "$outpem")
   if [ -z "$issuer_pem" ]; then args+=(-selfsign); else args+=(-cert "$issuer_pem"); fi
   CAN="$issuer" openssl ca "${args[@]}" 2>/dev/null
@@ -75,4 +83,16 @@ issue root root.pem inter.csr ext_ca inter.pem
 mkkey issuing; newdb issuing 4000; mkcsr issuing "/C=DE/O=Test Org/CN=Test Issuing CA"
 issue inter inter.pem issuing.csr ext_ca issuing.pem
 issue issuing issuing.pem dev.csr ext_dev dev_chain.pem
+
+# Zertifikate mit langem Issuer-DN (Probe-Build beim Import): longca ~375 Byte DN (passt nicht in einen
+# Attribut-Puffer von 512 Byte), medca ~200 Byte (passt). Beide von der flachen CA ausgestellt.
+rep() { printf "$1%.0s" $(seq 1 "$2"); }
+mkkey longca; newdb longca 5000
+mkcsr longca "/C=DE/ST=$(rep s 64)/L=$(rep l 64)/O=$(rep o 64)/OU=$(rep u 64)/CN=$(rep c 64)"
+issue ca ca.pem longca.csr ext_ca longca.pem pol_any
+issue longca longca.pem dev.csr ext_dev dev_longdn.pem
+mkkey medca; newdb medca 6000
+mkcsr medca "/C=DE/O=$(rep o 64)/OU=$(rep u 64)/CN=$(rep c 40)"
+issue ca ca.pem medca.csr ext_ca medca.pem pol_any
+issue medca medca.pem dev.csr ext_dev dev_meddn.pem
 echo "PKI in $out"

@@ -82,9 +82,11 @@ menu "ASiC-S Signer"
         default 5120
         range 1024 16384
         help
-            Muss die tatsaechlich importierte Kette fassen: Summe der Zertifikatslaengen
-            + ca. 700 Byte Overhead (Worst Case: ASICS_MAX_CHAIN * ASICS_CERT_MAX_LEN + 700).
-            Der Import lehnt Ketten ab, die nicht in den Puffer passen (ESP_ERR_NO_MEM).
+            Muss das CMS der importierten Kette fassen (Zertifikate + Attribute + Signatur;
+            Worst Case grob ASICS_MAX_CHAIN * ASICS_CERT_MAX_LEN + 700 Byte, mehr bei langem
+            Issuer-DN des Geraetezertifikats).
+            Der Import prueft das per Probe-Build und lehnt Ketten ab, die nicht in den
+            Puffer passen (ESP_ERR_NO_MEM).
 
     config ASICS_ATTRS_BUF_SIZE
         int "Puffergroesse fuer Signed Attributes (Bytes, Heap)"

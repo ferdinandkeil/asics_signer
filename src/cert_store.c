@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cert_store.h"
+#include "cades_builder.h"
 #include "asics_signer.h"
 #include "kv_store.h"
 #include "backend/key_backend.h"
@@ -66,6 +67,50 @@ static bool signed_by(mbedtls_x509_crt *child, mbedtls_x509_crt *parent)
     return true;
 }
 
+/* Platzhalter-Signer: maximale DER-ECDSA-Signaturlaenge (72 Byte) */
+static esp_err_t probe_sign(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len, void *ctx)
+{
+    (void)digest; (void)ctx;
+    static const uint8_t r[35] = {0x02, 0x21, 0x00, 0x80};
+    if (sig_size < 72) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t o = 0;
+    sig[o++] = 0x30;
+    sig[o++] = 70;
+    for (int i = 0; i < 2; i++) {
+        memcpy(sig + o, r, sizeof(r)); /* Rest ist Nullen: Inhalt egal, nur die Laenge zaehlt */
+        o += sizeof(r);
+    }
+    *sig_len = o;
+    return ESP_OK;
+}
+
+/* Worst-Case-CMS (laengste Signatur, GeneralizedTime) mit den echten Puffergroessen bauen */
+static esp_err_t probe_cms(const uint8_t *dev, size_t dev_len, const asics_der_t *chain, size_t chain_count)
+{
+    uint8_t *cms = malloc(CONFIG_ASICS_CMS_BUF_SIZE);
+    if (!cms) {
+        return ESP_ERR_NO_MEM;
+    }
+    cades_params_t p = {
+        .signing_time = (time_t)4000000000LL, /* 2096: GeneralizedTime-Pfad, im ZIP-Bereich bis 2107 */
+        .dev_cert = dev, .dev_cert_len = dev_len,
+        .ca_certs = chain, .ca_count = chain_count,
+        .sign = probe_sign,
+    };
+    size_t n = 0;
+    esp_err_t err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &n);
+    free(cms);
+    if (err == ESP_ERR_NO_MEM) {
+        ESP_LOGE(TAG, "CMS passt nicht in CONFIG_ASICS_CMS_BUF_SIZE/CONFIG_ASICS_ATTRS_BUF_SIZE "
+                      "(Kette zu gross oder Issuer-DN zu lang)");
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Probe-Build fehlgeschlagen: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
 esp_err_t asics_cert_store_import(const uint8_t *dev, size_t dev_len,
                                   const asics_der_t *chain, size_t chain_count,
                                   bool check_time, time_t now)
@@ -81,7 +126,7 @@ esp_err_t asics_cert_store_import(const uint8_t *dev, size_t dev_len,
     for (size_t i = 0; i < chain_count; i++) {
         total += chain[i].len;
     }
-    if (total + 700 > CONFIG_ASICS_CMS_BUF_SIZE) {
+    if (total > CONFIG_ASICS_CMS_BUF_SIZE) { /* Untergrenze; exakte Pruefung per Probe-Build unten */
         ESP_LOGE(TAG, "Kette (%u Byte) passt nicht in CONFIG_ASICS_CMS_BUF_SIZE", (unsigned)total);
         return ESP_ERR_NO_MEM;
     }
@@ -157,6 +202,13 @@ esp_err_t asics_cert_store_import(const uint8_t *dev, size_t dev_len,
         }
     } else {
         ESP_LOGW(TAG, "Uhr ungueltig: Zeitpruefung beim Import uebersprungen");
+    }
+
+    /* 4. Probe-Build: passt das CMS (inkl. Issuer-DN/Serial in signing-certificate-v2 und sid)
+     *    in CMS- und Attribut-Puffer? Sonst scheiterte spaeter jedes asics_sign(). */
+    err = probe_cms(dev, dev_len, chain, chain_count);
+    if (err != ESP_OK) {
+        goto done;
     }
 
     /* Blob: n_ca(u8) | len[0..n_ca] (u16 LE) | Zertifikate */

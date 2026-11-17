@@ -22,7 +22,8 @@
  *  - Public Key des Geraetezertifikats == Geraeteschluessel
  *  - Signaturkette (letztes Glied: bei Selbstsignatur gegen sich selbst), alle CA-Flags
  *  - Gueltigkeit aller Zertifikate zum Zeitpunkt now, falls check_time
- *  - Gesamtgroesse passt in CONFIG_ASICS_CMS_BUF_SIZE
+ *  - das CMS (Probe-Build mit laengster Signatur) passt in CONFIG_ASICS_CMS_BUF_SIZE und
+ *    CONFIG_ASICS_ATTRS_BUF_SIZE (beruecksichtigt auch lange Issuer-DNs)
  * Fehler: ASICS_ERR_CERT_PARSE/_KEY_MISMATCH/_CHAIN/_VALIDITY, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM.
  */
 esp_err_t asics_cert_store_import(const uint8_t *dev, size_t dev_len,

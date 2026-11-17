@@ -237,7 +237,7 @@ Menu **ASiC-S Signer**:
 | `ASICS_MIN_TIME` | 0 | Minimum valid Unix time (0 = time of the CMake run) |
 | `ASICS_CERT_MAX_LEN` | 1024 | Maximum DER size of one certificate |
 | `ASICS_MAX_CHAIN` | 4 | Maximum certificates in total (device + CAs), range 2..8 |
-| `ASICS_CMS_BUF_SIZE` | 5120 | CMS buffer; must hold the sum of all certificates + ~700 bytes |
+| `ASICS_CMS_BUF_SIZE` | 5120 | CMS buffer; must hold the CMS (all certificates + attributes + signature); import verifies this with a probe build |
 | `ASICS_ATTRS_BUF_SIZE`, `ASICS_CSR_BUF_SIZE` | 768, 768 | Work buffers |
 | `ASICS_PAYLOAD_NAME_MAX` | 100 | Maximum payload file name length |
 | `ASICS_WRITE_CHUNK` | 4096 | Maximum bytes per write-callback call |

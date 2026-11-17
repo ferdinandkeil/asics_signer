@@ -177,6 +177,20 @@ static void test_import_pem_bundle(void)
     free(bundle); free(big); free(d); free(i); free(m); free(r); free(x);
 }
 
+/* Import mit langem Issuer-DN: der Probe-Build muss exakt entscheiden, ob asics_sign spaeter gelingt */
+static void test_import_probe_size(void)
+{
+    setup();
+    const char *lng[] = {"longca.pem", "ca.pem"};
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, test_import_chain("dev_longdn.pem", lng, 2));
+    TEST_ASSERT_EQUAL(ASICS_STATE_KEY_NO_CERT, asics_signer_get_state());   /* nichts gespeichert */
+    const char *med[] = {"medca.pem", "ca.pem"};
+    TEST_ASSERT_EQUAL(ESP_OK, test_import_chain("dev_meddn.pem", med, 2));
+    int calls = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));   /* akzeptiert => signierbar */
+    TEST_ASSERT_TRUE(calls > 0);
+}
+
 static void test_sign_cert_validity(void)
 {
     setup();
@@ -255,6 +269,7 @@ void run_misc_tests(void)
     RUN_TEST(test_import_without_clock);
     RUN_TEST(test_chain_lengths);
     RUN_TEST(test_chain_errors);
+    RUN_TEST(test_import_probe_size);
     RUN_TEST(test_import_pem_bundle);
     RUN_TEST(test_sign_cert_validity);
     RUN_TEST(test_pem);
