@@ -119,6 +119,7 @@ issue futureca futureca.pem dev.csr ext_dev dev_futureca.pem
 #   tsa_noeku.pem:  gleicher Schluessel, aber OHNE EKU (Negativtest; openssl ts -reply kann damit nicht
 #                   antworten, der Test baut die Antwort per openssl cms -sign)
 #   tsa_foreign.pem: gleicher Schluessel, EKU ok, aber von tsa_root2 (fremde CA)
+#   tsa_root_rsa.pem (RSA-4096-Root, DER > 1 KB), tsa_rsa_big.pem (RSA-TSA darunter), Sektion tsa_rsa
 #   tsa_inter.pem, tsa_leaf2.pem: Zwischen-CA unter tsa_root und TSA-Zertifikat (Schluessel tsa.key) darunter
 #   tsa_rsa.pem/.key: TSA-Zertifikat mit RSA-2048-Schluessel (EKU ok, von tsa_root)
 #   tsa.cnf:        Konfiguration fuer "openssl ts -reply" (Sektionen tsa_good, tsa_foreign)
@@ -137,16 +138,23 @@ issue tsa_root2 tsa_root2.pem tsa.csr ext_tsa tsa_foreign.pem
 openssl genrsa -out tsa_rsa.key 2048 2>/dev/null
 mkcsr tsa_rsa "/C=DE/O=Test Org/CN=Test TSA RSA"
 issue tsa_root tsa_root.pem tsa_rsa.csr ext_tsa tsa_rsa.pem
+# RSA-4096-TSA-Root (DER > 1 KB) mit RSA-TSA-Zertifikat darunter (Cache-/Groessentest der eingebetteten TSA-CA)
+openssl genrsa -out tsa_root_rsa.key 4096 2>/dev/null; newdb tsa_root_rsa 9800
+mkcsr tsa_root_rsa "/C=DE/O=Test Org/CN=Test TSA Root RSA-4096"
+issue tsa_root_rsa "" tsa_root_rsa.csr ext_root tsa_root_rsa.pem
+issue tsa_root_rsa tsa_root_rsa.pem tsa_rsa.csr ext_tsa tsa_rsa_big.pem
 : > tsa_serial; echo 01 > tsa_serial
-for s in good foreign; do
-  case $s in good) cert=tsa.pem; chain=tsa_root.pem;; foreign) cert=tsa_foreign.pem; chain=tsa_root2.pem;; esac
+for s in good foreign rsa; do
+  key=tsa.key
+  case $s in good) cert=tsa.pem; chain=tsa_root.pem;; foreign) cert=tsa_foreign.pem; chain=tsa_root2.pem;;
+    rsa) cert=tsa_rsa_big.pem; chain=tsa_root_rsa.pem; key=tsa_rsa.key;; esac
   cat >> tsa.cnf <<CNF
 [tsa_$s]
 serial = $out/tsa_serial
 crypto_device = builtin
 signer_cert = $out/$cert
 certs = $out/$chain
-signer_key = $out/tsa.key
+signer_key = $out/$key
 signer_digest = sha256
 default_policy = 1.2.3.4.5
 other_policies = 1.2.3.4.6

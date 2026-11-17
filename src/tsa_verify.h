@@ -12,12 +12,13 @@
 #include <stdint.h>
 #include <time.h>
 #include "esp_err.h"
+#include "mbedtls/x509_crt.h"
 #include "tsa_resp.h"
 
 /**
  * @param t        zerlegter Token (tsa_parse_token)
- * @param ca_der   vertrauenswuerdige TSA-CA (DER, selbstsigniert oder Zwischen-CA mit CA-Flag)
+ * @param ca       vertrauenswuerdige TSA-CA (geparst, selbstsigniert oder Zwischen-CA; CA-Flag muss gesetzt sein)
  * @param gen_time genTime aus dem TSTInfo (Gueltigkeitszeitpunkt der Zertifikate)
  * @return ESP_OK oder ASICS_ERR_TSA_INVALID (mit Log-Meldung zum Grund)
  */
-esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time);
+esp_err_t tsa_verify_token(const tsa_token_t *t, const mbedtls_x509_crt *ca, time_t gen_time);

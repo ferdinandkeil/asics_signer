@@ -259,7 +259,7 @@ callback. Redirects are not followed.
 
 **Configuration.** Set `CONFIG_ASICS_TSA_URL` and `CONFIG_ASICS_TSA_CA_PEM`, the path of exactly one trusted
 TSA CA as a PEM file (relative paths are relative to the project directory); it is embedded in the firmware.
-Without a TSA CA or URL no time stamp can be produced: `PREFERRED` falls back to B-B and `REQUIRED` fails with
+The CA is decoded on the heap (no fixed size limit, so RSA-4096 roots are fine), parsed once on first use and cached. Without a TSA CA or URL no time stamp can be produced: `PREFERRED` falls back to B-B and `REQUIRED` fails with
 `ASICS_ERR_TSA_UNAVAILABLE`. The application provides the network (for example Wi-Fi) and a clock accurate to
 within the tolerance; the call blocks until the TSA answers or `CONFIG_ASICS_TSA_TIMEOUT_MS` expires.
 

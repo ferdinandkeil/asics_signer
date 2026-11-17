@@ -11,6 +11,7 @@
 #include "tsa_host.h"
 #include "tsa_resp.h"
 #include "tsa_verify.h"
+#include "mbedtls/x509_crt.h"
 #include "asics_provision.h"
 #include "time_source.h"
 
@@ -216,6 +217,17 @@ static void test_tsa_generalized_time(void)
     TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.0Z", 17, &t));  /* nur Null */
 }
 
+/* tsa_verify_token nimmt die TSA-CA geparst; Tests haben sie als DER */
+static esp_err_t verify_der_ca(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time)
+{
+    mbedtls_x509_crt ca;
+    mbedtls_x509_crt_init(&ca);
+    TEST_ASSERT_EQUAL(0, mbedtls_x509_crt_parse_der(&ca, ca_der, ca_len));
+    esp_err_t e = tsa_verify_token(t, &ca, gen_time);
+    mbedtls_x509_crt_free(&ca);
+    return e;
+}
+
 /* ---- Token-Pruefung (Signatur, ESS, TSA-Zertifikat) ---- */
 static esp_err_t verify_exchange(exch_t *x, const char *ca_pem, time_t gen_time_override, bool use_override)
 {
@@ -228,7 +240,7 @@ static esp_err_t verify_exchange(exch_t *x, const char *ca_pem, time_t gen_time_
     TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
     size_t cl;
     uint8_t *ca = test_pem_to_der(ca_pem, &cl);
-    esp_err_t err = tsa_verify_token(&t, ca, cl, use_override ? gen_time_override : gt);
+    esp_err_t err = verify_der_ca(&t, ca, cl, use_override ? gen_time_override : gt);
     free(ca);
     return err;
 }
@@ -275,7 +287,7 @@ static void test_tsa_verify_negative(void)
     ((uint8_t *)t.tstinfo)[t.tstinfo_len - 1] ^= 0x01;
     size_t cl;
     uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
-    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_verify_token(&t, ca, cl, time(NULL)));
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_der_ca(&t, ca, cl, time(NULL)));
     free(ca);
 }
 
@@ -334,7 +346,7 @@ static esp_err_t verify_custom_ex(const exch_t *x, const char *cert, const char 
     TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(tok, n, &t));
     size_t cl;
     uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
-    esp_err_t e = tsa_verify_token(&t, ca, cl, time(NULL));
+    esp_err_t e = verify_der_ca(&t, ca, cl, time(NULL));
     free(ca);
     return e;
 }
@@ -632,7 +644,7 @@ static void test_tsa_external_response(void)
     TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
     size_t cl;
     uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
-    esp_err_t err = tsa_verify_token(&t, ca, cl, gt);
+    esp_err_t err = verify_der_ca(&t, ca, cl, gt);
     free(ca);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 }
@@ -734,7 +746,7 @@ static esp_err_t verify_chain_token(const exch_t *x, const char *leaf, const cha
     TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(tok, n, &t));
     size_t cl;
     uint8_t *ca = test_pem_to_der(anchor, &cl);
-    esp_err_t e = tsa_verify_token(&t, ca, cl, gen);
+    esp_err_t e = verify_der_ca(&t, ca, cl, gen);
     free(ca);
     return e;
 }
@@ -755,6 +767,34 @@ static void test_tsa_verify_intermediate(void)
     TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_chain_token(&x, "tsa_leaf2.pem", "tsa_inter.pem", "tsa_root.pem", (time_t)1600000000));
 }
 
+/* TSA-CA > 1 KB (RSA-4096): wird auf dem Heap dekodiert, nur einmal geparst und gecacht; RSA-TSA-Zertifikat */
+static void test_tsa_big_ca(void)
+{
+    static char *big_pem;
+    size_t n, dl;
+    big_pem = (char *)test_read_pki("tsa_root_rsa.pem", &n);
+    free(test_pem_to_der("tsa_root_rsa.pem", &dl));
+    TEST_ASSERT_TRUE_MESSAGE(dl > 1024, "TSA-CA soll groesser als der frueher feste 1-KB-Puffer sein");
+    static const uint8_t data[] = "x;y\n";
+    asics_sign_result_t res;
+    tsa_setup(ASICS_TSA_REQUIRED);
+    asics_tsa_host_set_ca_pem(big_pem);
+    asics_tsa_host_set_section("tsa_rsa");
+    for (int i = 0; i < 2; i++) {                       /* zweiter Lauf nutzt die gecachte CA */
+        sink_t s = {0};
+        TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+        TEST_ASSERT_EQUAL(ASICS_LEVEL_B_T, res.level);
+        sink_free(&s);
+    }
+    asics_tsa_host_set_ca_pem(s_ca_pem);                /* anderer Anker: Cache wird verworfen -> Ablehnung */
+    sink_t s = {0};
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+    TEST_ASSERT_EQUAL(0, s.calls);
+    asics_tsa_host_set_section("tsa_good");
+    asics_tsa_host_set_ca_pem(s_ca_pem);
+    free(big_pem);
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -772,6 +812,7 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_policy_check);
     RUN_TEST(test_tsa_sign_modes_ok);
     RUN_TEST(test_tsa_sign_faults);
+    RUN_TEST(test_tsa_big_ca);
     RUN_TEST(test_tsa_mode_api);
     RUN_TEST(test_tsa_external_response);
 }

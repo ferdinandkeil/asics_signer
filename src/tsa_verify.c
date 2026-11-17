@@ -161,18 +161,15 @@ static int vrfy_time_cb(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *f
     return 0;
 }
 
-esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time)
+esp_err_t tsa_verify_token(const tsa_token_t *t, const mbedtls_x509_crt *ca, time_t gen_time)
 {
     esp_err_t err = ASICS_ERR_TSA_INVALID;
     mbedtls_x509_crt *tsa = calloc(1, sizeof(*tsa));
-    mbedtls_x509_crt *ca = calloc(1, sizeof(*ca));
     uint8_t *attrs_copy = NULL;
-    if (!tsa || !ca) {
-        free(tsa); free(ca);
+    if (!tsa) {
         return ESP_ERR_NO_MEM;
     }
     mbedtls_x509_crt_init(tsa);
-    mbedtls_x509_crt_init(ca);
 
     /* --- SignerInfo --- */
     der_rd_t si = t->signer_info, sid_rd, alg, attrs, sigalg;
@@ -342,17 +339,12 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
     if (!eku_ok(tsa)) {
         FAIL("TSA-Zertifikat: kritische EKU timeStamping (ausschliesslich) fehlt");
     }
-    if (mbedtls_x509_crt_parse_der(ca, ca_der, ca_len) != 0 || ca->next != NULL) {
-        FAIL("eingebettete TSA-CA nicht parsebar");
-    }
-    if (mbedtls_x509_crt_get_ca_istrue(ca) != 1) {
-        FAIL("eingebettete TSA-CA hat kein CA-Flag");
-    }
     /* Kette: TSA-Zertifikat (Blatt) + untrusted Zwischenzertifikate aus dem Token -> eingebettete TSA-CA (Anker).
      * Die Zeitpruefung erfolgt im Callback fuer jedes tatsaechlich verwendete Kettenglied gegen genTime. */
     time_check_t tc = {.gen_time = gen_time, .ok = true};
     uint32_t flags = 0;
-    int rc = mbedtls_x509_crt_verify(tsa, ca, NULL, NULL, &flags, vrfy_time_cb, &tc);
+    int rc = mbedtls_x509_crt_verify(tsa, (mbedtls_x509_crt *)ca /* mbedtls aendert den Anker nicht */, NULL, NULL, &flags,
+                                    vrfy_time_cb, &tc);
     if ((rc != 0 && rc != MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) || flags != 0) {
         FAIL("TSA-Zertifikat nicht ueber die eingebettete TSA-CA verifizierbar");
     }
@@ -363,8 +355,6 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
 done:
     free(attrs_copy);
     mbedtls_x509_crt_free(tsa);
-    mbedtls_x509_crt_free(ca);
     free(tsa);
-    free(ca);
     return err;
 }
