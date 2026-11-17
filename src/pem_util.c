@@ -8,12 +8,17 @@
 #include "pem_util.h"
 #include "mbedtls/base64.h"
 
+size_t asics_pem_encoded_min_size(const char *label, size_t len)
+{
+    size_t b64max = ((len + 2) / 3) * 4 + 1;
+    return 2 * (strlen(label) + 16) + b64max + b64max / 64 + 8;
+}
+
 esp_err_t asics_pem_encode(const char *label, const uint8_t *der, size_t len,
                            char *out, size_t out_size, size_t *out_len)
 {
     size_t b64max = ((len + 2) / 3) * 4 + 1;
-    size_t need = 2 * (strlen(label) + 16) + b64max + b64max / 64 + 8;
-    if (out_size < need) {
+    if (out_size < asics_pem_encoded_min_size(label, len)) {
         return ESP_ERR_NO_MEM;
     }
     char *b64 = out + out_size - b64max; /* Base64 am Pufferende, PEM wird vorne aufgebaut */
@@ -24,7 +29,10 @@ esp_err_t asics_pem_encode(const char *label, const uint8_t *der, size_t len,
     size_t n = (size_t)snprintf(out, out_size, "-----BEGIN %s-----\n", label);
     for (size_t i = 0; i < blen; i += 64) {
         size_t c = blen - i > 64 ? 64 : blen - i;
-        if (out + n + c + 1 > b64 + i) { /* Ueberlappungsschutz: vorne darf hinten nicht ueberholen */
+        /* Ueberlappungsschutz: Der Schreibzeiger (inkl. '\n' nach dieser Zeile, also bis out + n + c)
+         * darf den noch ungelesenen Rest (ab b64 + i + c) nicht erreichen. Nach der letzten Zeile gibt
+         * es keinen ungelesenen Rest mehr. */
+        if (i + c < blen && out + n + c + 1 > b64 + i + c) {
             return ESP_ERR_NO_MEM;
         }
         memmove(out + n, b64 + i, c);

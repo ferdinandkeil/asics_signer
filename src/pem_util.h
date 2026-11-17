@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+/** Mindestgroesse des Ausgabepuffers von asics_pem_encode() fuer len DER-Bytes (inkl. Terminator). */
+size_t asics_pem_encoded_min_size(const char *label, size_t len);
+
 /** DER -> PEM (nullterminiert, 64 Zeichen pro Zeile). ESP_ERR_NO_MEM bei zu kleinem Puffer. */
 esp_err_t asics_pem_encode(const char *label, const uint8_t *der, size_t len,
                            char *out, size_t out_size, size_t *out_len);

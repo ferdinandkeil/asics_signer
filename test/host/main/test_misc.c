@@ -9,6 +9,7 @@
 #include "asics_provision.h"
 #include "kv_store.h"
 #include "pem_util.h"
+#include "mbedtls/base64.h"
 #include "time_source.h"
 
 static time_t g_now = TEST_TIME;
@@ -205,6 +206,45 @@ static void test_sign_cert_validity(void)
     TEST_ASSERT_EQUAL(ok_calls, calls);               /* keine Ausgabe bei Verweigerung */
 }
 
+/* Erwartetes PEM unabhaengig mit mbedtls-Base64 bilden */
+static void expected_pem(const char *label, const uint8_t *der, size_t len, char *out, size_t cap)
+{
+    size_t bl = 0;
+    char *b64 = malloc(len * 2 + 8);
+    TEST_ASSERT_EQUAL(0, mbedtls_base64_encode((unsigned char *)b64, len * 2 + 8, &bl, der, len));
+    size_t n = (size_t)snprintf(out, cap, "-----BEGIN %s-----\n", label);
+    for (size_t i = 0; i < bl; i += 64) {
+        size_t c = bl - i > 64 ? 64 : bl - i;
+        memcpy(out + n, b64 + i, c);
+        n += c;
+        out[n++] = '\n';
+    }
+    snprintf(out + n, cap - n, "-----END %s-----\n", label);
+    free(b64);
+}
+
+/* Puffer exakt in Mindestgroesse: Ergebnis muss dem unabhaengig kodierten PEM entsprechen */
+static void test_pem_encode_exact_buffer(void)
+{
+    const size_t lens[] = {1, 2, 3, 4, 47, 48, 49, 95, 96, 97, 144, 192, 300, 480, 481, 768, 1000};
+    uint8_t der[1024];
+    for (size_t i = 0; i < sizeof(der); i++) der[i] = (uint8_t)(i * 31 + 7);
+    for (size_t k = 0; k < sizeof(lens) / sizeof(lens[0]); k++) {
+        for (int l = 0; l < 2; l++) {
+            const char *label = l ? "CERTIFICATE REQUEST" : "CERTIFICATE";
+            size_t need = asics_pem_encoded_min_size(label, lens[k]);
+            char *out = malloc(need), *want = malloc(need + 2048);
+            size_t n = 0;
+            TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, asics_pem_encode(label, der, lens[k], out, need, &n), "Puffer == Mindestgroesse");
+            expected_pem(label, der, lens[k], want, need + 2048);
+            TEST_ASSERT_EQUAL(strlen(want), n);
+            TEST_ASSERT_EQUAL_MEMORY(want, out, n);
+            TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, asics_pem_encode(label, der, lens[k], out, need - 1, &n));
+            free(out); free(want);
+        }
+    }
+}
+
 static void test_pem(void)
 {
     uint8_t der[200];
@@ -273,6 +313,7 @@ void run_misc_tests(void)
     RUN_TEST(test_import_pem_bundle);
     RUN_TEST(test_sign_cert_validity);
     RUN_TEST(test_pem);
+    RUN_TEST(test_pem_encode_exact_buffer);
     RUN_TEST(test_import_pem_api);
     RUN_TEST(test_sign_args);
 }
