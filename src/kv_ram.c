@@ -51,6 +51,9 @@ esp_err_t asics_kv_get(const char *key, void *buf, size_t *len)
 
 esp_err_t asics_kv_set(const char *key, const void *data, size_t len, bool overwrite)
 {
+    if (!key || (!data && len > 0)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     int i = find(key);
     if (i >= 0 && !overwrite) {
         return ESP_ERR_INVALID_STATE;
@@ -68,7 +71,9 @@ esp_err_t asics_kv_set(const char *key, const void *data, size_t len, bool overw
     if (!n) {
         return ESP_ERR_NO_MEM;
     }
-    memcpy(n, data, len);
+    if (len > 0) {
+        memcpy(n, data, len);
+    }
     free(s_e[i].data);
     s_e[i].data = n;
     s_e[i].len = len;

@@ -346,6 +346,18 @@ static void test_import_pem_api(void)
     free(pd); free(pc);
 }
 
+static void test_kv_set_args(void)
+{
+    asics_kv_ram_reset();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, asics_kv_set("k", NULL, 5, true));   /* kein memcpy aus NULL */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, asics_kv_set(NULL, "x", 1, true));
+    size_t l = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, asics_kv_get("k", NULL, &l));          /* nichts angelegt */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_kv_set("k", NULL, 0, true));                /* leerer Blob ist erlaubt */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_kv_get("k", NULL, &l));
+    TEST_ASSERT_EQUAL(0, l);
+}
+
 static void test_sign_args(void)
 {
     setup();
@@ -375,5 +387,6 @@ void run_misc_tests(void)
     RUN_TEST(test_pem_encode_exact_buffer);
     RUN_TEST(test_pem_reader_commands);
     RUN_TEST(test_import_pem_api);
+    RUN_TEST(test_kv_set_args);
     RUN_TEST(test_sign_args);
 }
