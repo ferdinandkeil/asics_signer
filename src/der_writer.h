@@ -25,6 +25,9 @@ typedef struct {
     int err;        /**< != 0 nach Ueberlauf/Fehler */
 } der_t;
 
+/** Maximale Elementzahl von der_set_of_sorted() (Zertifikate im CMS-Set: Geraet + CAs). */
+#define DER_SET_MAX 8
+
 typedef struct {
     const uint8_t *p;
     size_t len;
@@ -50,7 +53,7 @@ void der_bit_string(der_t *d, const uint8_t *data, size_t len);
 void der_string(der_t *d, uint8_t tag, const char *s, size_t len);
 /**
  * SET OF aus fertig kodierten Elementen schreiben, DER-sortiert
- * (X.690 11.6: aufsteigend nach Oktettvergleich). n <= 8.
+ * (X.690 11.6: aufsteigend nach Oktettvergleich). n <= DER_SET_MAX.
  */
 void der_set_of_sorted(der_t *d, const der_item_t *items, size_t n, uint8_t tag);
 

@@ -25,6 +25,8 @@ static const uint8_t OID_SIGNING_TIME[] = {0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x
 /* id-aa-signingCertificateV2 = 1.2.840.113549.1.9.16.2.47 */
 static const uint8_t OID_SIGNING_CERT_V2[] = {0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x09,0x10,0x02,0x2F};
 
+_Static_assert(CONFIG_ASICS_MAX_CHAIN <= DER_SET_MAX, "ASICS_MAX_CHAIN passt nicht in ein DER-SET (DER_SET_MAX)");
+
 #define SEQ 0x30
 #define SET 0x31
 
@@ -76,7 +78,7 @@ static esp_err_t format_time(time_t t, char *buf, size_t *len, uint8_t *tag)
 esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, size_t *out_len)
 {
     if (!p || !p->sign || !out || !out_len || !p->dev_cert || !p->ca_certs ||
-        p->ca_count == 0 || p->ca_count + 1 > 8) {
+        p->ca_count == 0 || p->ca_count + 1 > DER_SET_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t err = ESP_ERR_NO_MEM;
@@ -100,20 +102,17 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     der_t a;
     der_init(&a, scratch, abs);
     der_item_t items[4];
-    size_t m;
 
     /* content-type = id-data */
-    size_t cur = der_size(&a);
-    m = cur;
+    size_t cur = der_size(&a); /* Beginn des jeweiligen Attributs */
     OID(&a, OID_DATA);
-    finish_attr(&a, m, OID_CONTENT_TYPE, sizeof(OID_CONTENT_TYPE));
+    finish_attr(&a, cur, OID_CONTENT_TYPE, sizeof(OID_CONTENT_TYPE));
     items[0] = (der_item_t){a.p, der_size(&a) - cur};
 
     /* message-digest */
     cur = der_size(&a);
-    m = cur;
     der_octet_string(&a, p->payload_digest, ASICS_DIGEST_LEN);
-    finish_attr(&a, m, OID_MSG_DIGEST, sizeof(OID_MSG_DIGEST));
+    finish_attr(&a, cur, OID_MSG_DIGEST, sizeof(OID_MSG_DIGEST));
     items[1] = (der_item_t){a.p, der_size(&a) - cur};
 
     /* signing-time */
@@ -126,30 +125,27 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     }
     err = ESP_ERR_NO_MEM; /* ab hier: Fehler = Pufferueberlauf */
     cur = der_size(&a);
-    m = cur;
     der_string(&a, ttag, tbuf, tlen);
-    finish_attr(&a, m, OID_SIGNING_TIME, sizeof(OID_SIGNING_TIME));
+    finish_attr(&a, cur, OID_SIGNING_TIME, sizeof(OID_SIGNING_TIME));
     items[2] = (der_item_t){a.p, der_size(&a) - cur};
 
     /* signing-certificate-v2: ESSCertIDv2 (SHA-256 = DEFAULT, daher ohne hashAlgorithm) */
     uint8_t cert_hash[32];
     mbedtls_sha256(p->dev_cert, p->dev_cert_len, cert_hash, 0);
     cur = der_size(&a);
-    m = der_size(&a);
     {
-        size_t m_is = der_size(&a);
         der_int_raw(&a, crt->serial.p, crt->serial.len);
         size_t m_gn = der_size(&a);
         der_raw(&a, crt->issuer_raw.p, crt->issuer_raw.len);
         der_wrap(&a, m_gn, 0xA4);        /* [4] directoryName */
         der_wrap(&a, m_gn, SEQ);         /* GeneralNames */
-        der_wrap(&a, m_is, SEQ);         /* IssuerSerial */
+        der_wrap(&a, cur, SEQ);          /* IssuerSerial */
         der_octet_string(&a, cert_hash, sizeof(cert_hash)); /* certHash */
-        der_wrap(&a, m_is, SEQ);         /* ESSCertIDv2 */
-        der_wrap(&a, m_is, SEQ);         /* certs SEQUENCE OF */
-        der_wrap(&a, m_is, SEQ);         /* SigningCertificateV2 */
+        der_wrap(&a, cur, SEQ);          /* ESSCertIDv2 */
+        der_wrap(&a, cur, SEQ);          /* certs SEQUENCE OF */
+        der_wrap(&a, cur, SEQ);          /* SigningCertificateV2 */
     }
-    finish_attr(&a, m, OID_SIGNING_CERT_V2, sizeof(OID_SIGNING_CERT_V2));
+    finish_attr(&a, cur, OID_SIGNING_CERT_V2, sizeof(OID_SIGNING_CERT_V2));
     items[3] = (der_item_t){a.p, der_size(&a) - cur};
     if (a.err) {
         goto done;
@@ -176,8 +172,7 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     /* ---- Gesamtstruktur rueckwaerts ---- */
     der_t d;
     der_init(&d, out, out_size);
-    size_t m_all = der_size(&d);
-    size_t m_sd = m_all;
+    size_t m_all = der_size(&d); /* Beginn von ContentInfo/[0]/SignedData */
 
     size_t m_si = der_size(&d);
     if (p->unsigned_attrs) {
@@ -193,13 +188,9 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     }
     der_octet_string(&d, sig, sig_len);
     write_alg(&d, OID_ECDSA_SHA256, sizeof(OID_ECDSA_SHA256));
-    {
-        size_t before = der_size(&d);
-        der_raw(&d, der_data(&s), der_size(&s));
-        if (!d.err) {
-            d.p[0] = 0xA0; /* [0] IMPLICIT statt SET (Hash wurde mit 0x31 gebildet) */
-        }
-        (void)before;
+    der_raw(&d, der_data(&s), der_size(&s));
+    if (!d.err) {
+        d.p[0] = 0xA0; /* [0] IMPLICIT statt SET (Hash wurde mit 0x31 gebildet) */
     }
     write_alg(&d, OID_SHA256, sizeof(OID_SHA256));
     {   /* IssuerAndSerialNumber */
@@ -214,7 +205,7 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
     der_wrap(&d, m_si, SET);  /* signerInfos */
 
     {   /* certificates [0] IMPLICIT SET OF, DER-sortiert */
-        der_item_t certs[8] = {{p->dev_cert, p->dev_cert_len}};
+        der_item_t certs[DER_SET_MAX] = {{p->dev_cert, p->dev_cert_len}};
         for (size_t i = 0; i < p->ca_count; i++) {
             certs[i + 1] = (der_item_t){p->ca_certs[i].der, p->ca_certs[i].len};
         }
@@ -231,8 +222,8 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
         der_wrap(&d, m_a, SET);
     }
     der_int(&d, 1);
-    der_wrap(&d, m_sd, SEQ);   /* SignedData */
-    der_wrap(&d, m_sd, 0xA0);  /* [0] EXPLICIT */
+    der_wrap(&d, m_all, SEQ);  /* SignedData */
+    der_wrap(&d, m_all, 0xA0); /* [0] EXPLICIT */
     OID(&d, OID_SIGNED_DATA);
     der_wrap(&d, m_all, SEQ);  /* ContentInfo */
 

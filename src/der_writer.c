@@ -115,8 +115,8 @@ static int item_cmp(const der_item_t *a, const der_item_t *b)
 
 void der_set_of_sorted(der_t *d, const der_item_t *items, size_t n, uint8_t tag)
 {
-    der_item_t s[8];
-    if (n > 8) {
+    der_item_t s[DER_SET_MAX];
+    if (n > DER_SET_MAX) {
         d->err = -1;
         return;
     }
