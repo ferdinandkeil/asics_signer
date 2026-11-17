@@ -109,6 +109,17 @@ void asics_pem_reader_init(asics_pem_reader_t *r, char *buf, size_t cap, const c
     if (cap) buf[0] = 0;
 }
 
+bool asics_pem_reader_is_command(const asics_pem_reader_t *r, const char *line, const char *cmd)
+{
+    if (r->in_block) {
+        return false;
+    }
+    while (*line == ' ' || *line == '\t') line++;
+    size_t n = strlen(line);
+    while (n && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ' || line[n - 1] == '\t')) n--;
+    return n == strlen(cmd) && strncmp(line, cmd, n) == 0;
+}
+
 asics_pem_state_t asics_pem_reader_feed(asics_pem_reader_t *r, const char *line)
 {
     while (*line == ' ' || *line == '\t') line++;

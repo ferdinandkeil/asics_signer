@@ -210,7 +210,7 @@ application with `asics_console_register()`):
 3. The manufacturing CA issues the device certificate.
 4. `asics import`: paste the device certificate (PEM), then each CA certificate. The issuing CA comes
    first, each following certificate is the issuer of the previous one, and a self-signed root at the
-   end is optional. Finish with the line `end`, or cancel with `abort`.
+   end is optional. Finish with the line `end`, or cancel with `abort` (both are only recognised outside a PEM block).
 
 On import, the component checks:
 

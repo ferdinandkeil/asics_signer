@@ -69,10 +69,11 @@ static blk_t read_block(const char *prompt, char *buf, size_t cap, bool allow_en
         if (!fgets(line, sizeof(line), stdin)) {
             return BLK_ABORT;
         }
-        if (strncmp(line, "abort", 5) == 0) {
+        /* Steuerwoerter nur ausserhalb eines PEM-Blocks (innerhalb sind es Base64-Daten) */
+        if (asics_pem_reader_is_command(&r, line, "abort")) {
             return BLK_ABORT;
         }
-        if (allow_end && !r.in_block && strncmp(line, "end", 3) == 0) {
+        if (allow_end && asics_pem_reader_is_command(&r, line, "end")) {
             return BLK_END;
         }
         asics_pem_state_t st = asics_pem_reader_feed(&r, line);

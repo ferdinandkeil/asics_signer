@@ -34,5 +34,12 @@ typedef struct {
 } asics_pem_reader_t;
 
 void asics_pem_reader_init(asics_pem_reader_t *r, char *buf, size_t cap, const char *label);
+/**
+ * true, wenn line (ohne Leerraum/Zeilenende) genau dem Steuerwort cmd entspricht UND der Leser sich
+ * ausserhalb eines PEM-Blocks befindet. Innerhalb eines Blocks sind Zeilen immer Base64-Daten
+ * (z. B. kann "abort" ein gueltiges Base64-Praefix sein).
+ */
+bool asics_pem_reader_is_command(const asics_pem_reader_t *r, const char *line, const char *cmd);
+
 /** Eine Textzeile einspeisen; Zeilen vor BEGIN werden ignoriert. DONE nach END-Marker. */
 asics_pem_state_t asics_pem_reader_feed(asics_pem_reader_t *r, const char *line);

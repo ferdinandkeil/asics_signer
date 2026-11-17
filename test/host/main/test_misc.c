@@ -318,6 +318,23 @@ static void test_pem(void)
     TEST_ASSERT_EQUAL(ASICS_PEM_ERROR, asics_pem_reader_feed(&r, "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="));
 }
 
+/* "abort"/"end" sind nur ausserhalb eines PEM-Blocks Steuerwoerter ("abort" ist ein gueltiges Base64-Praefix) */
+static void test_pem_reader_commands(void)
+{
+    char buf[200];
+    asics_pem_reader_t r;
+    asics_pem_reader_init(&r, buf, sizeof(buf), "CERTIFICATE");
+    TEST_ASSERT_TRUE(asics_pem_reader_is_command(&r, "abort\n", "abort"));
+    TEST_ASSERT_TRUE(asics_pem_reader_is_command(&r, "  end \r\n", "end"));
+    TEST_ASSERT_FALSE(asics_pem_reader_is_command(&r, "abortXYZ\n", "abort"));
+    TEST_ASSERT_FALSE(asics_pem_reader_is_command(&r, "endx\n", "end"));
+    TEST_ASSERT_EQUAL(ASICS_PEM_NEED_MORE, asics_pem_reader_feed(&r, "-----BEGIN CERTIFICATE-----\n"));
+    TEST_ASSERT_FALSE(asics_pem_reader_is_command(&r, "abort\n", "abort"));    /* im Block: Daten */
+    TEST_ASSERT_FALSE(asics_pem_reader_is_command(&r, "end\n", "end"));
+    TEST_ASSERT_EQUAL(ASICS_PEM_NEED_MORE, asics_pem_reader_feed(&r, "abort\n"));
+    TEST_ASSERT_EQUAL(ASICS_PEM_DONE, asics_pem_reader_feed(&r, "-----END CERTIFICATE-----\n"));
+}
+
 static void test_import_pem_api(void)
 {
     setup();
@@ -356,6 +373,7 @@ void run_misc_tests(void)
     RUN_TEST(test_sign_chain_validity);
     RUN_TEST(test_pem);
     RUN_TEST(test_pem_encode_exact_buffer);
+    RUN_TEST(test_pem_reader_commands);
     RUN_TEST(test_import_pem_api);
     RUN_TEST(test_sign_args);
 }
