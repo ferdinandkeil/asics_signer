@@ -183,7 +183,9 @@ esp_err_t cades_build(const cades_params_t *p, uint8_t *out, size_t out_size, si
             err = herr;
             goto done;
         }
-        der_wrap(&d, m_ua, 0xA1);
+        if (der_size(&d) > m_ua) { /* unsignedAttrs ist SET SIZE(1..MAX): bei leerem Hook weglassen */
+            der_wrap(&d, m_ua, 0xA1);
+        }
     }
     der_octet_string(&d, sig, sig_len);
     write_alg(&d, OID_ECDSA_SHA256, sizeof(OID_ECDSA_SHA256));

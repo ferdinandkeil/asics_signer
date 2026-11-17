@@ -68,6 +68,13 @@ static esp_err_t hook(der_t *d, const uint8_t *sig, size_t sl, void *ctx)
 
 static uint8_t cms[CONFIG_ASICS_CMS_BUF_SIZE];
 
+static esp_err_t hook_empty(der_t *d, const uint8_t *sig, size_t sl, void *ctx)
+{
+    (void)d; (void)sig; (void)sl; (void)ctx;
+    return ESP_OK;                                   /* schreibt nichts */
+}
+static bool g_empty_hook;
+
 static size_t build(time_t t, bool with_hook)
 {
     size_t dl, cl, n;
@@ -76,7 +83,7 @@ static size_t build(time_t t, bool with_hook)
     cades_params_t p = {.signing_time = t, .dev_cert = dev, .dev_cert_len = dl, .ca_certs = &cad, .ca_count = 1,
                         .sign = stub_sign};
     memset(p.payload_digest, 0xAB, 32);
-    if (with_hook) p.unsigned_attrs = hook;
+    if (with_hook) p.unsigned_attrs = g_empty_hook ? hook_empty : hook;
     TEST_ASSERT_EQUAL(ESP_OK, cades_build(&p, cms, sizeof(cms), &n));
     free(dev); free(ca);
     return n;
@@ -229,6 +236,21 @@ static void test_cades_unsigned_hook(void)
     TEST_ASSERT_TRUE(r.si_rest.p == r.si_rest.end);
 }
 
+/* Hook ohne Ausgabe: kein leeres [1] (A1 00), Ergebnis identisch zum Fall ohne Hook */
+static void test_cades_unsigned_hook_empty(void)
+{
+    size_t n0 = build(TEST_TIME, false);
+    uint8_t copy[CONFIG_ASICS_CMS_BUF_SIZE];
+    memcpy(copy, cms, n0);
+    g_empty_hook = true;
+    size_t n = build(TEST_TIME, true);
+    g_empty_hook = false;
+    TEST_ASSERT_EQUAL(n0, n);
+    TEST_ASSERT_EQUAL_MEMORY(copy, cms, n);
+    parsed_t r = parse(n);
+    TEST_ASSERT_TRUE(r.si_rest.p == r.si_rest.end);
+}
+
 static void test_cades_buffer_too_small(void)
 {
     size_t dl, cl, n;
@@ -323,6 +345,7 @@ void run_cades_tests(void)
     RUN_TEST(test_cades_time_encoding);
     RUN_TEST(test_cades_time_range);
     RUN_TEST(test_cades_unsigned_hook);
+    RUN_TEST(test_cades_unsigned_hook_empty);
     RUN_TEST(test_cades_buffer_too_small);
     RUN_TEST(test_e2e_sign_and_verify);
     RUN_TEST(test_chain_in_cms);

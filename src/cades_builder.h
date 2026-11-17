@@ -15,6 +15,7 @@
  * Hook fuer unsignedAttrs (spaeter z. B. signature-time-stamp fuer CAdES-B-T).
  * Schreibt die Attribute (jeweils komplette Attribute-SEQUENCE, rueckwaerts-
  * Konvention des der_writer) in d; cades_build() umschliesst sie mit [1] IMPLICIT.
+ * Schreibt der Hook nichts, entfaellt unsignedAttrs ganz (kein leeres [1]).
  * Der Hook erhaelt die fertige Signatur (Eingabe fuer einen Zeitstempel).
  */
 typedef esp_err_t (*cades_unsigned_attrs_cb_t)(der_t *d, const uint8_t *sig, size_t sig_len, void *ctx);
