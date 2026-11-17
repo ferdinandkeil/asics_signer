@@ -49,11 +49,11 @@ void der_int(der_t *d, int v);
 /** INTEGER aus bereits kodierten Inhaltsbytes (z. B. Zertifikats-Seriennummer). */
 void der_int_raw(der_t *d, const uint8_t *content, size_t len);
 void der_octet_string(der_t *d, const uint8_t *data, size_t len);
-/** BIT STRING mit 0 unused bits. */
 /** BOOLEAN. */
 void der_bool(der_t *d, bool v);
 /** INTEGER aus vorzeichenlosen Big-Endian-Bytes (fuehrende Nullen entfernt, ggf. 0x00 vorangestellt). */
 void der_uint_be(der_t *d, const uint8_t *be, size_t len);
+/** BIT STRING mit 0 unused bits. */
 void der_bit_string(der_t *d, const uint8_t *data, size_t len);
 void der_string(der_t *d, uint8_t tag, const char *s, size_t len);
 /**

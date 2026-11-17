@@ -16,11 +16,11 @@
 #include "mbedtls/sha256.h"
 #include "sdkconfig.h"
 #include "tsa_host.h"
+#include "asn1_oids.h"
 
 static const char *TAG = "asics_tsa";
 
 /* id-aa-signatureTimeStampToken = 1.2.840.113549.1.9.16.2.14 */
-static const uint8_t OID_SIG_TIMESTAMP[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0E};
 
 #if defined(ASICS_TSA_CA_EMBEDDED)
 extern const char asics_tsa_ca_pem_start[] asm("_binary_asics_tsa_ca_pem_start");
@@ -105,7 +105,7 @@ esp_err_t tsa_attr_hook(der_t *d, const uint8_t *sig, size_t sig_len, void *ctx)
     size_t m = der_size(d);
     der_raw(d, token, token_len);
     der_wrap(d, m, 0x31);
-    der_oid(d, OID_SIG_TIMESTAMP, sizeof(OID_SIG_TIMESTAMP));
+    der_oid(d, ASN1_OID_SIG_TIMESTAMP, sizeof(ASN1_OID_SIG_TIMESTAMP));
     der_wrap(d, m, 0x30);
     if (d->err) {
         c->err = ESP_ERR_NO_MEM;

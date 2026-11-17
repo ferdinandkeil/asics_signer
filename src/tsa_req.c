@@ -8,10 +8,10 @@
 #include "der_writer.h"
 #include "mbedtls/asn1.h"
 #include "mbedtls/oid.h"
+#include "asn1_oids.h"
 
 #define SEQ 0x30
 
-static const uint8_t OID_SHA256[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
 
 esp_err_t asics_tsa_build_request(const uint8_t digest[32], const uint8_t nonce[ASICS_TSA_NONCE_LEN],
                                   const char *policy_oid, uint8_t *out, size_t size, size_t *len)
@@ -39,7 +39,7 @@ esp_err_t asics_tsa_build_request(const uint8_t digest[32], const uint8_t nonce[
         size_t m_alg = der_size(&d);
         static const uint8_t null_val[] = {0x05, 0x00};
         der_raw(&d, null_val, sizeof(null_val));
-        der_oid(&d, OID_SHA256, sizeof(OID_SHA256));
+        der_oid(&d, ASN1_OID_SHA256, sizeof(ASN1_OID_SHA256));
         der_wrap(&d, m_alg, SEQ);
         der_wrap(&d, m, SEQ);
     }

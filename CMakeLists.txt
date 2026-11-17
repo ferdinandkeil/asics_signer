@@ -15,6 +15,7 @@ set(srcs
     "src/time_source.c"
     "src/pem_util.c"
     "src/tsa_req.c"
+    "src/asn1_oids.c"
     "src/tsa_resp.c"
     "src/tsa_verify.c"
     "src/tsa.c"

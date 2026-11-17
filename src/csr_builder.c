@@ -8,17 +8,11 @@
 #include "csr_builder.h"
 #include "mbedtls/asn1.h"
 #include "mbedtls/sha256.h"
+#include "asn1_oids.h"
 
 #define SEQ 0x30
 #define SET 0x31
 
-static const uint8_t OID_CN[]      = {0x55, 0x04, 0x03};
-static const uint8_t OID_SERIAL[]  = {0x55, 0x04, 0x05};
-static const uint8_t OID_COUNTRY[] = {0x55, 0x04, 0x06};
-static const uint8_t OID_ORG[]     = {0x55, 0x04, 0x0A};
-static const uint8_t OID_EC_PUBKEY[] = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01};
-static const uint8_t OID_P256[]      = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07};
-static const uint8_t OID_ECDSA_SHA256[] = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02};
 
 static bool printable_ok(const char *s)
 {
@@ -74,22 +68,22 @@ esp_err_t csr_build(const csr_params_t *p, uint8_t *out, size_t out_size, size_t
         size_t m = der_size(&c);
         der_bit_string(&c, p->pub, ASICS_PUBKEY_LEN);
         size_t m_alg = der_size(&c);
-        der_oid(&c, OID_P256, sizeof(OID_P256));
-        der_oid(&c, OID_EC_PUBKEY, sizeof(OID_EC_PUBKEY));
+        der_oid(&c, ASN1_OID_P256, sizeof(ASN1_OID_P256));
+        der_oid(&c, ASN1_OID_EC_PUBKEY, sizeof(ASN1_OID_EC_PUBKEY));
         der_wrap(&c, m_alg, SEQ);
         der_wrap(&c, m, SEQ);
     }
     {   /* Subject: C, O, serialNumber, CN (Reihenfolge im DER = Schreibreihenfolge rueckwaerts) */
         size_t m = der_size(&c);
-        write_rdn(&c, OID_CN, sizeof(OID_CN), MBEDTLS_ASN1_UTF8_STRING, p->cn);
+        write_rdn(&c, ASN1_OID_CN, sizeof(ASN1_OID_CN), MBEDTLS_ASN1_UTF8_STRING, p->cn);
         if (has_serial) {
-            write_rdn(&c, OID_SERIAL, sizeof(OID_SERIAL), MBEDTLS_ASN1_PRINTABLE_STRING, p->serial);
+            write_rdn(&c, ASN1_OID_SERIAL, sizeof(ASN1_OID_SERIAL), MBEDTLS_ASN1_PRINTABLE_STRING, p->serial);
         }
         if (has_org) {
-            write_rdn(&c, OID_ORG, sizeof(OID_ORG), MBEDTLS_ASN1_UTF8_STRING, p->org);
+            write_rdn(&c, ASN1_OID_ORG, sizeof(ASN1_OID_ORG), MBEDTLS_ASN1_UTF8_STRING, p->org);
         }
         if (has_c) {
-            write_rdn(&c, OID_COUNTRY, sizeof(OID_COUNTRY), MBEDTLS_ASN1_PRINTABLE_STRING, p->country);
+            write_rdn(&c, ASN1_OID_COUNTRY, sizeof(ASN1_OID_COUNTRY), MBEDTLS_ASN1_PRINTABLE_STRING, p->country);
         }
         der_wrap(&c, m, SEQ);
     }
@@ -115,7 +109,7 @@ esp_err_t csr_build(const csr_params_t *p, uint8_t *out, size_t out_size, size_t
     der_bit_string(&d, sig, sig_len);
     {
         size_t m = der_size(&d);
-        der_oid(&d, OID_ECDSA_SHA256, sizeof(OID_ECDSA_SHA256));
+        der_oid(&d, ASN1_OID_ECDSA_SHA256, sizeof(ASN1_OID_ECDSA_SHA256));
         der_wrap(&d, m, SEQ);
     }
     der_raw(&d, der_data(&c), der_size(&c));

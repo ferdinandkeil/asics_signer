@@ -6,12 +6,10 @@
 #include "tsa_resp.h"
 #include "asics_signer.h"
 #include "esp_log.h"
+#include "asn1_oids.h"
 
 static const char *TAG = "asics_tsa";
 
-static const uint8_t OID_SIGNED_DATA[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02};
-static const uint8_t OID_CT_TSTINFO[]  = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x01, 0x04};
-static const uint8_t OID_SHA256[]      = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
 
 #define INVALID(msg) do { ESP_LOGE(TAG, "%s", msg); return ASICS_ERR_TSA_INVALID; } while (0)
 
@@ -52,15 +50,15 @@ esp_err_t tsa_parse_token(const uint8_t *token, size_t len, tsa_token_t *t)
     size_t vl;
     memset(t, 0, sizeof(*t));
     if (!der_rd_enter(&top, 0x30, &ci) || !der_rd_done(&top) ||
-        !der_rd_next(&ci, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || vl != sizeof(OID_SIGNED_DATA) ||
-        memcmp(v, OID_SIGNED_DATA, vl) != 0 || !der_rd_enter(&ci, 0xA0, &ex) || !der_rd_enter(&ex, 0x30, &sd)) {
+        !der_rd_next(&ci, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || vl != sizeof(ASN1_OID_SIGNED_DATA) ||
+        memcmp(v, ASN1_OID_SIGNED_DATA, vl) != 0 || !der_rd_enter(&ci, 0xA0, &ex) || !der_rd_enter(&ex, 0x30, &sd)) {
         INVALID("Token ist kein SignedData");
     }
     if (!der_rd_next(&sd, &tag, &v, &vl, NULL, NULL) || tag != 0x02 /* version */ ||
         !der_rd_next(&sd, &tag, &v, &vl, NULL, NULL) || tag != 0x31 /* digestAlgorithms */ ||
         !der_rd_enter(&sd, 0x30, &eci) ||
-        !der_rd_next(&eci, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || vl != sizeof(OID_CT_TSTINFO) ||
-        memcmp(v, OID_CT_TSTINFO, vl) != 0 || !der_rd_enter(&eci, 0xA0, &ec) ||
+        !der_rd_next(&eci, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || vl != sizeof(ASN1_OID_CT_TSTINFO) ||
+        memcmp(v, ASN1_OID_CT_TSTINFO, vl) != 0 || !der_rd_enter(&eci, 0xA0, &ec) ||
         !der_rd_next(&ec, &tag, &v, &vl, NULL, NULL) || tag != 0x04) {
         INVALID("eContentType ist nicht id-ct-TSTInfo");
     }
@@ -156,7 +154,7 @@ esp_err_t tsa_check_tstinfo(const uint8_t *tstinfo, size_t len, const tsa_expect
         !der_rd_next(&alg, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
         INVALID("TSTInfo: messageImprint defekt");
     }
-    if (vl != sizeof(OID_SHA256) || memcmp(v, OID_SHA256, vl) != 0) {
+    if (vl != sizeof(ASN1_OID_SHA256) || memcmp(v, ASN1_OID_SHA256, vl) != 0) {
         INVALID("TSTInfo: messageImprint nicht SHA-256");
     }
     if (!der_rd_next(&mi, &tag, &v, &vl, NULL, NULL) || tag != 0x04 || vl != 32 || memcmp(v, e->digest, 32) != 0) {

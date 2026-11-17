@@ -11,20 +11,10 @@
 #include "mbedtls/md.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/x509_crt.h"
+#include "asn1_oids.h"
 
 static const char *TAG = "asics_tsa";
 
-static const uint8_t OID_CT_TSTINFO[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x01, 0x04};
-static const uint8_t OID_CONTENT_TYPE[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x03};
-static const uint8_t OID_MSG_DIGEST[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x04};
-static const uint8_t OID_SIGNING_CERT[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0C};
-static const uint8_t OID_SIGNING_CERT_V2[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x2F};
-static const uint8_t OID_SHA1[] = {0x2B, 0x0E, 0x03, 0x02, 0x1A};
-static const uint8_t OID_SHA256[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
-static const uint8_t OID_SHA384[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02};
-static const uint8_t OID_SHA512[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03};
-static const uint8_t OID_EXT_EKU[] = {0x55, 0x1D, 0x25};
-static const uint8_t OID_KP_TIMESTAMPING[] = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08};
 
 #define FAIL(msg) do { ESP_LOGE(TAG, "%s", msg); err = ASICS_ERR_TSA_INVALID; goto done; } while (0)
 #define OIDEQ(v, vl, o) ((vl) == sizeof(o) && memcmp((v), (o), sizeof(o)) == 0)
@@ -32,10 +22,10 @@ static const uint8_t OID_KP_TIMESTAMPING[] = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07
 /* Hash-Algorithmus aus OID; sha1 nur fuer ESS (allow_sha1) */
 static mbedtls_md_type_t md_from_oid(const uint8_t *v, size_t vl, bool allow_sha1)
 {
-    if (OIDEQ(v, vl, OID_SHA256)) return MBEDTLS_MD_SHA256;
-    if (OIDEQ(v, vl, OID_SHA384)) return MBEDTLS_MD_SHA384;
-    if (OIDEQ(v, vl, OID_SHA512)) return MBEDTLS_MD_SHA512;
-    if (allow_sha1 && OIDEQ(v, vl, OID_SHA1)) return MBEDTLS_MD_SHA1;
+    if (OIDEQ(v, vl, ASN1_OID_SHA256)) return MBEDTLS_MD_SHA256;
+    if (OIDEQ(v, vl, ASN1_OID_SHA384)) return MBEDTLS_MD_SHA384;
+    if (OIDEQ(v, vl, ASN1_OID_SHA512)) return MBEDTLS_MD_SHA512;
+    if (allow_sha1 && OIDEQ(v, vl, ASN1_OID_SHA1)) return MBEDTLS_MD_SHA1;
     return MBEDTLS_MD_NONE;
 }
 
@@ -61,7 +51,7 @@ static bool eku_ok(const mbedtls_x509_crt *c)
         if (!der_rd_enter(&exts, 0x30, &ext) || !der_rd_next(&ext, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
             return false;
         }
-        if (!OIDEQ(v, vl, OID_EXT_EKU)) {
+        if (!OIDEQ(v, vl, ASN1_OID_EXT_EKU)) {
             continue;
         }
         bool critical = false;
@@ -73,7 +63,7 @@ static bool eku_ok(const mbedtls_x509_crt *c)
         if (!critical || !der_rd_enter(&ext, 0x04, &oct) || !der_rd_enter(&oct, 0x30, &seq)) {
             return false;
         }
-        if (!der_rd_next(&seq, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, OID_KP_TIMESTAMPING)) {
+        if (!der_rd_next(&seq, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, ASN1_OID_KP_TIMESTAMPING)) {
             return false;
         }
         return der_rd_done(&seq); /* nur diese EKU */
@@ -145,12 +135,12 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
         if (!der_rd_enter(&at, 0x31, &vals)) {
             FAIL("signedAttrs: Attributwert defekt");
         }
-        if (OIDEQ(oid, oid_len, OID_CONTENT_TYPE)) {
-            if (!der_rd_next(&vals, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, OID_CT_TSTINFO)) {
+        if (OIDEQ(oid, oid_len, ASN1_OID_CONTENT_TYPE)) {
+            if (!der_rd_next(&vals, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, ASN1_OID_CT_TSTINFO)) {
                 FAIL("signedAttrs: content-type != id-ct-TSTInfo");
             }
             got_ct = true;
-        } else if (OIDEQ(oid, oid_len, OID_MSG_DIGEST)) {
+        } else if (OIDEQ(oid, oid_len, ASN1_OID_MSG_DIGEST)) {
             uint8_t h[64];
             size_t hl;
             if (!der_rd_next(&vals, &tag, &v, &vl, NULL, NULL) || tag != 0x04 ||
@@ -158,8 +148,8 @@ esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t c
                 FAIL("signedAttrs: message-digest stimmt nicht mit dem TSTInfo ueberein");
             }
             got_md = true;
-        } else if (OIDEQ(oid, oid_len, OID_SIGNING_CERT) || OIDEQ(oid, oid_len, OID_SIGNING_CERT_V2)) {
-            bool v2 = OIDEQ(oid, oid_len, OID_SIGNING_CERT_V2);
+        } else if (OIDEQ(oid, oid_len, ASN1_OID_SIGNING_CERT) || OIDEQ(oid, oid_len, ASN1_OID_SIGNING_CERT_V2)) {
+            bool v2 = OIDEQ(oid, oid_len, ASN1_OID_SIGNING_CERT_V2);
             der_rd_t sc, certs, id;
             if (!der_rd_enter(&vals, 0x30, &sc) || !der_rd_enter(&sc, 0x30, &certs) || !der_rd_enter(&certs, 0x30, &id)) {
                 FAIL("ESS signing-certificate defekt");

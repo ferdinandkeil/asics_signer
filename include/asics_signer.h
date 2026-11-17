@@ -36,13 +36,14 @@ extern "C" {
 
 /** Ein Zertifikat der gespeicherten Kette (Geraet oder CA) ist zum Signierzeitpunkt (aktuelle
  *  Zeit) nicht gueltig (noch nicht gueltig oder abgelaufen). asics_sign() verweigert die Signatur. */
+#define ASICS_ERR_SIGNER_CERT_VALIDITY (ASICS_ERR_BASE + 5)
+
 /** TSA nicht erreichbar (Netzwerk, Timeout, HTTP-Fehler, keine TSA konfiguriert). */
 #define ASICS_ERR_TSA_UNAVAILABLE      (ASICS_ERR_BASE + 6)
 /** TSA hat die Anfrage abgelehnt (PKIStatus weder granted noch grantedWithMods). */
 #define ASICS_ERR_TSA_REJECTED         (ASICS_ERR_BASE + 7)
 /** Die TSA-Antwort hat die Pruefung auf dem Geraet nicht bestanden. */
 #define ASICS_ERR_TSA_INVALID          (ASICS_ERR_BASE + 8)
-#define ASICS_ERR_SIGNER_CERT_VALIDITY (ASICS_ERR_BASE + 5)
 
 /** Ein DER-kodiertes Zertifikat (Zeiger + Laenge). */
 typedef struct {
