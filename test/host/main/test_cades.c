@@ -3,10 +3,15 @@
 #include <stdlib.h>
 #include "test_support.h"
 #include "asics_signer.h"
+#include "asics_provision.h"
 #include "cades_builder.h"
+#include "time_source.h"
+#include "kv_store.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/pk.h"
+
+static time_t fixed_time(void) { return TEST_TIME; }
 
 /* --- minimaler DER-Walker --- */
 typedef struct { const uint8_t *p, *end; } cur_t;
@@ -216,10 +221,89 @@ static void test_cades_buffer_too_small(void)
     free(dev); free(ca);
 }
 
+/* End-to-End: echte Signatur pruefen (Signatur ueber 0x31||attrs mit Public Key des Gerätezertifikats) */
+static void test_e2e_sign_and_verify(void)
+{
+    asics_time_set_provider(fixed_time);
+    test_install_device_key();
+    asics_config_t cfg = {.device_serial = "SN-1"};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(&cfg));
+    TEST_ASSERT_EQUAL(ASICS_STATE_KEY_NO_CERT, asics_signer_get_state());
+    test_load_certs("dev.pem", "ca.pem");
+    TEST_ASSERT_EQUAL(ASICS_STATE_PROVISIONED, asics_signer_get_state());
+
+    const char *csv = "zeit;wert\n2026-01-15T12:00:00Z;42,5\n";
+    sink_t s = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("messung.csv", (const uint8_t *)csv, strlen(csv), sink_write, &s));
+    test_write_out("messung.csv", csv, strlen(csv));
+    test_write_out("sample.asics", s.buf, s.len);
+
+    /* Signatur-Eintrag extrahieren (letzter Local Header) */
+    size_t pos = 30 + 8 + 31;                                         /* nach mimetype */
+    pos += 30 + 11 + strlen(csv);                                     /* nach messung.csv */
+    const uint8_t *signame = s.buf + pos + 30;
+    TEST_ASSERT_EQUAL_MEMORY("META-INF/signature.p7s", signame, 22);
+    size_t sl = s.buf[pos + 18] | (s.buf[pos + 19] << 8) | (s.buf[pos + 20] << 16);
+    memcpy(cms, s.buf + pos + 30 + 22, sl);
+    parsed_t r = parse(sl);
+
+    uint8_t *attrs = malloc(r.attrs_len);
+    memcpy(attrs, r.attrs, r.attrs_len);
+    attrs[0] = 0x31;
+    uint8_t h[32];
+    mbedtls_sha256(attrs, r.attrs_len, h, 0);
+    free(attrs);
+    size_t dl;
+    uint8_t *dev = test_pem_to_der("dev.pem", &dl);
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+    TEST_ASSERT_EQUAL(0, mbedtls_x509_crt_parse_der(&crt, dev, dl));
+    TEST_ASSERT_EQUAL(0, mbedtls_pk_verify(&crt.pk, MBEDTLS_MD_SHA256, h, 32, r.sig, r.sig_len));
+    mbedtls_x509_crt_free(&crt);
+    free(dev);
+
+    /* message-digest-Attribut == SHA-256 der Nutzdaten */
+    uint8_t pd[32];
+    mbedtls_sha256((const uint8_t *)csv, strlen(csv), pd, 0);
+    bool found = false;
+    for (size_t i = 0; i + 32 <= r.attrs_len; i++) if (!memcmp(r.attrs + i, pd, 32)) found = true;
+    TEST_ASSERT_TRUE(found);
+    sink_free(&s);
+}
+
+static void chain_sign(const char *const *chain, size_t n, int expect_certs, const char *outname)
+{
+    asics_time_set_provider(fixed_time);
+    test_install_device_key();
+    TEST_ASSERT_EQUAL(ESP_OK, asics_signer_init(NULL));
+    TEST_ASSERT_EQUAL_HEX(ESP_OK, test_import_chain("dev_chain.pem", chain, n));
+    const char *csv = "zeit;wert\n2026-01-15T12:00:00Z;42,5\n";
+    sink_t s = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign("messung.csv", (const uint8_t *)csv, strlen(csv), sink_write, &s));
+    size_t pos = 30 + 8 + 31 + 30 + 11 + strlen(csv);
+    size_t sl = s.buf[pos + 18] | (s.buf[pos + 19] << 8) | (s.buf[pos + 20] << 16);
+    TEST_ASSERT_TRUE(sl <= sizeof(cms));
+    memcpy(cms, s.buf + pos + 30 + 22, sl);
+    parsed_t r = parse(sl);
+    TEST_ASSERT_EQUAL(expect_certs, r.ncerts);
+    test_write_out(outname, s.buf, s.len);
+    sink_free(&s);
+}
+
+static void test_chain_in_cms(void)
+{
+    const char *c4[] = {"issuing.pem", "inter.pem", "root.pem"};   /* Geraet + 3 CAs = 4 Zertifikate */
+    chain_sign(c4, 3, 4, "sample_chain.asics");
+    const char *c3[] = {"issuing.pem", "inter.pem"};               /* ohne Root */
+    chain_sign(c3, 2, 3, "sample_chain3.asics");
+}
+
 void run_cades_tests(void)
 {
     RUN_TEST(test_cades_structure_and_determinism);
     RUN_TEST(test_cades_time_encoding);
     RUN_TEST(test_cades_unsigned_hook);
     RUN_TEST(test_cades_buffer_too_small);
+    RUN_TEST(test_e2e_sign_and_verify);
+    RUN_TEST(test_chain_in_cms);
 }

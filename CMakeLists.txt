@@ -2,10 +2,16 @@
 idf_build_get_property(target IDF_TARGET)
 
 set(srcs
+    "src/asics_signer.c"
+    "src/asics_provision.c"
     "src/asics_container.c"
     "src/zip_writer.c"
     "src/der_writer.c"
     "src/cades_builder.c"
+    "src/csr_builder.c"
+    "src/cert_store.c"
+    "src/time_source.c"
+    "src/pem_util.c"
     "src/backend/backend_nvs.c"
     "src/backend/backend_se_stub.c")
 

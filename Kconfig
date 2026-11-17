@@ -30,6 +30,13 @@ menu "ASiC-S Signer"
         string "NVS-Namespace"
         default "asics"
 
+    config ASICS_AUTO_GENERATE_KEY
+        bool "Schluessel bei Erstinbetriebnahme automatisch erzeugen"
+        default y
+        help
+            asics_signer_init() erzeugt einen Schluessel, falls keiner vorhanden ist.
+            Ein vorhandener Schluessel wird niemals ersetzt.
+
     config ASICS_BOOTLOADER_RANDOM
         bool "bootloader_random_enable() um die Schluesselerzeugung (nur ESP32-Familie)"
         default y
@@ -47,6 +54,27 @@ menu "ASiC-S Signer"
             Schuetzt den NVS-abgelegten Schluessel. Fuer Entwicklungsaufbauten
             abschalten (es wird eine Warnung protokolliert).
 
+    config ASICS_MIN_TIME
+        int "Mindest-Zeitpunkt (Unix-Zeit, 0 = Build-Zeitpunkt)"
+        default 0
+        range 0 4102444800
+        help
+            Liegt time() darunter, wird nicht signiert (ESP_ERR_INVALID_STATE).
+            0 verwendet den Zeitpunkt des CMake-Konfigurationslaufs.
+
+    config ASICS_CERT_MAX_LEN
+        int "Maximale Laenge eines Zertifikats (DER, Bytes)"
+        default 1024
+        range 512 4096
+
+    config ASICS_MAX_CHAIN
+        int "Maximale Gesamtzahl Zertifikate (Geraet + CA-Kette)"
+        default 4
+        range 2 8
+        help
+            Geraetezertifikat plus 1..(n-1) CA-Zertifikate (Issuing-CA, Zwischen-CAs,
+            optional Root). Der Speicher-Blob ist bis zu n * ASICS_CERT_MAX_LEN gross.
+
     config ASICS_CMS_BUF_SIZE
         int "Puffergroesse fuer die CMS-Signatur (Bytes, Heap)"
         default 5120
@@ -61,6 +89,11 @@ menu "ASiC-S Signer"
         default 768
         range 512 4096
 
+    config ASICS_CSR_BUF_SIZE
+        int "Puffergroesse fuer den PKCS#10-CSR (Bytes)"
+        default 768
+        range 384 4096
+
     config ASICS_PAYLOAD_NAME_MAX
         int "Maximale Laenge des Nutzdatei-Namens"
         default 100
@@ -70,5 +103,13 @@ menu "ASiC-S Signer"
         int "Maximale Chunk-Groesse pro Schreib-Callback (Bytes)"
         default 4096
         range 64 65536
+
+    config ASICS_SUBJECT_ORG
+        string "CSR-Subject: Organisation (O), leer = weglassen"
+        default ""
+
+    config ASICS_SUBJECT_COUNTRY
+        string "CSR-Subject: Land (C, 2 Buchstaben), leer = weglassen"
+        default ""
 
 endmenu

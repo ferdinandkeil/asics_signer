@@ -2,11 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "test_support.h"
+#include "kv_store.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/ecp.h"
 #include "mbedtls/base64.h"
+#include "backend/key_backend.h"
+#include "asics_provision.h"
 
 void run_zip_tests(void);
 void run_cades_tests(void);
 void run_csr_tests(void);
+void run_misc_tests(void);
 
 esp_err_t sink_write(const void *buf, size_t len, void *ctx)
 {
@@ -76,12 +82,57 @@ void test_write_out(const char *name, const void *data, size_t len)
     fclose(f);
 }
 
+void test_install_device_key(void)
+{
+    asics_kv_ram_reset();
+    size_t pl;
+    uint8_t *pem = test_read_pki("dev.key", &pl);
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    TEST_ASSERT_EQUAL(0, mbedtls_pk_parse_key(&pk, pem, pl + 1, NULL, 0, NULL, NULL));
+    mbedtls_ecp_keypair *kp = mbedtls_pk_ec(pk);
+    uint8_t blob[98];
+    size_t ol;
+    blob[0] = 0x01; /* Blob-Format von backend_nvs.c */
+    TEST_ASSERT_EQUAL(0, mbedtls_ecp_write_key_ext(kp, &ol, blob + 1, 32));
+    TEST_ASSERT_EQUAL(0, mbedtls_ecp_write_public_key(kp, MBEDTLS_ECP_PF_UNCOMPRESSED, &ol, blob + 33, 65));
+    TEST_ASSERT_EQUAL(ESP_OK, asics_kv_set("key", blob, sizeof(blob), false));
+    mbedtls_pk_free(&pk);
+    free(pem);
+}
+
+esp_err_t test_import_chain(const char *dev, const char *const *chain, size_t n)
+{
+    size_t dl;
+    uint8_t *d = test_pem_to_der(dev, &dl);
+    asics_der_t refs[8];
+    uint8_t *mem[8];
+    TEST_ASSERT_TRUE(n <= 8);
+    for (size_t i = 0; i < n; i++) {
+        size_t l;
+        mem[i] = test_pem_to_der(chain[i], &l);
+        refs[i].der = mem[i];
+        refs[i].len = l;
+    }
+    esp_err_t e = asics_provision_import_der(d, dl, refs, n);
+    free(d);
+    for (size_t i = 0; i < n; i++) free(mem[i]);
+    return e;
+}
+
+void test_load_certs(const char *dev, const char *ca)
+{
+    const char *c[1] = {ca};
+    TEST_ASSERT_EQUAL_HEX(ESP_OK, test_import_chain(dev, c, 1));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
     run_zip_tests();
     run_cades_tests();
     run_csr_tests();
+    run_misc_tests();
     int fails = UNITY_END();
     exit(fails ? 1 : 0);
 }

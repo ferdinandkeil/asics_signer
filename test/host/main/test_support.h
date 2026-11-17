@@ -18,3 +18,8 @@ uint8_t *test_read_pki(const char *name, size_t *len);
 uint8_t *test_pem_to_der(const char *name, size_t *len);
 /** Ausgabedatei in ASICS_TEST_OUT schreiben. */
 void test_write_out(const char *name, const void *data, size_t len);
+/** Fixture-Schluessel (dev.key) in den RAM-NVS laden (Testhilfe, nicht Teil der API). */
+void test_install_device_key(void);
+/** Geraetezertifikat + Kette (Dateinamen, Issuing-CA zuerst) importieren; Rueckgabe = Importergebnis. */
+esp_err_t test_import_chain(const char *dev, const char *const *chain, size_t n);
+void test_load_certs(const char *dev, const char *ca);
