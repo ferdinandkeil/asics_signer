@@ -1,0 +1,6 @@
+## IDF Component Manager Manifest
+version: "0.1.0"
+description: "ASiC-S (ETSI EN 319 162) Signaturkomponente: CAdES-B-B Detached (SHA-256 / ECDSA P-256) in einem STORE-only ZIP-Container"
+license: "Proprietary"
+dependencies:
+  idf: ">=5.2.5"
