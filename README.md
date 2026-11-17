@@ -289,6 +289,28 @@ warnings, because CAdES-B-B carries no revocation data and none is fetched offli
 `signing-certificate-v2` checks are raised to FAIL. See [`tools/dss/README.md`](tools/dss/README.md)
 (in German) for details.
 
+### Hardware test
+
+`examples/basic_sign` was tested on an ESP32-D0WD-V3 (chip revision v3.0, 4 MB flash, ESP-IDF 5.2.5).
+Flash encryption was off and the key was stored in unencrypted NVS (development setup).
+
+| Step | Result |
+|------|--------|
+| First boot with empty NVS | key generated in 444 ms |
+| `asics csr` | CSR signature valid; `CN` matches the eFuse base MAC |
+| Import of device certificate + single CA | accepted, state `PROVISIONED` |
+| Import of device certificate + issuing → intermediate → root | accepted (re-import), 4 certificates embedded |
+| Signing on the device, validation with EU DSS | `TOTAL_PASSED`, `CAdES-BASELINE-B` (single CA and chain) |
+| Reset | no new key, same public key, chain retained |
+| Signing after reset without setting the clock | refused with `ESP_ERR_INVALID_STATE` |
+
+Measured with a 36-byte payload:
+
+* `asics_sign()` takes about 236 ms, independent of chain length.
+* Peak heap use is about 15 KB: about 9.2 KB is the fixed buffer, the rest is used by mbedTLS.
+* The console task used about 3.6 KB of its 8 KB stack.
+* The container is 1589 bytes with a single CA and 2405 bytes with the 4-certificate chain.
+
 ## Limitations and roadmap
 
 * Secure element / TPM 2.0 backend: interface only (stub)
@@ -296,7 +318,8 @@ warnings, because CAdES-B-B carries no revocation data and none is fetched offli
 * No ZIP64 (payload < 4 GiB)
 * CAdES-B-T (RFC 3161 time stamp from a TSA): planned, hook for unsigned attributes in place
 * Not checked on import: `pathLen` constraints and revocation status
-* Console, NVS backend and entropy handling have so far been compiled for `esp32` but not run on hardware
+* Production security features (Secure Boot v2, flash encryption, NVS encryption) have not yet been
+  tested together with the component on hardware
 
 ## Authors
 
