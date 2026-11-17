@@ -47,12 +47,10 @@ echo "== EU-DSS-Validierung (tools/verify_dss.sh)"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   "$repo/tools/verify_dss.sh" sample.asics "$pki/ca.pem"   # Fehlschlag bricht ab (set -e)
   echo "DSS: sample.asics TOTAL_PASSED"
-  # Kettencontainer: informativ. Die Offline-Policy (tools/dss/policy) lockert die Sperrdatenpruefung
-  # bisher nur fuer das Signerzertifikat, nicht fuer CA-Zertifikate -> INDETERMINATE ist hier ein
-  # Policy-, kein Containerproblem. Nach Policy-Anpassung auf harte Pruefung umstellen.
+  # Kettencontainer gegen die Root als Vertrauensanker; Fehlschlag bricht ab (set -e)
   for c in sample_chain.asics sample_chain3.asics; do
-    if "$repo/tools/verify_dss.sh" "$c" "$pki/root.pem"; then echo "DSS: $c TOTAL_PASSED"
-    else echo "WARNUNG: DSS meldet fuer $c nicht TOTAL_PASSED (siehe Hinweis im Skript)"; fi
+    "$repo/tools/verify_dss.sh" "$c" "$pki/root.pem"
+    echo "DSS: $c TOTAL_PASSED"
   done
 else
   echo "HINWEIS: Docker nicht verfuegbar/Daemon nicht erreichbar - DSS-Validierung UEBERSPRUNGEN (kein Fehlschlag)."
