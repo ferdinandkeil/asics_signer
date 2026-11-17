@@ -38,7 +38,7 @@ if(target STREQUAL "linux")
         PRIV_INCLUDE_DIRS "src" "src/backend" "${mbed_dir}/library"
         PRIV_REQUIRES esp_rom esp_hw_support log)
 else()
-    set(priv_srcs "src/kv_nvs.c")
+    set(priv_srcs "src/kv_nvs.c" "src/tsa_http.c")
     if(CONFIG_ASICS_ENABLE_CONSOLE)
         list(APPEND priv_srcs "src/console/asics_console.c")
     endif()
@@ -47,7 +47,7 @@ else()
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "src" "src/backend"
         REQUIRES esp_common
-        PRIV_REQUIRES mbedtls nvs_flash esp_rom esp_hw_support bootloader_support console log)
+        PRIV_REQUIRES mbedtls nvs_flash esp_rom esp_hw_support bootloader_support console log esp_http_client esp-tls)
 endif()
 
 # Mindest-Zeitpunkt: Standard ist der Zeitpunkt des CMake-Konfigurationslaufs.

@@ -116,6 +116,20 @@ menu "ASiC-S Signer"
         string "CSR-Subject: Land (C, 2 Buchstaben), leer = weglassen"
         default ""
 
+    config ASICS_TSA_URL
+        string "TSA-URL fuer RFC-3161-Zeitstempel (HTTP/HTTPS), leer = keine TSA"
+        default ""
+        help
+            Zeitstempel-Autoritaet fuer CAdES-B-T. Anfrage per HTTP-POST
+            (application/timestamp-query). Bei https:// wird das mbedTLS-Zertifikatsbundle
+            verwendet, sofern CONFIG_MBEDTLS_CERTIFICATE_BUNDLE aktiv ist. Leer: Zeitstempel
+            sind nicht moeglich (ASICS_ERR_TSA_UNAVAILABLE).
+
+    config ASICS_TSA_TIMEOUT_MS
+        int "Timeout der TSA-Anfrage (ms)"
+        default 5000
+        range 500 60000
+
     config ASICS_ENABLE_CONSOLE
         bool "UART-Konsolenbefehl 'asics' (status/csr/import)"
         default y
