@@ -18,16 +18,6 @@
 #include "mbedtls/sha256.h"
 #include "mbedtls/x509_crt.h"
 
-static inline bool len_fits_u32(size_t n)
-{
-#if SIZE_MAX > 0xFFFFFFFFu
-    return n <= 0xFFFFFFFFu;
-#else
-    (void)n;
-    return true;
-#endif
-}
-
 static const char *TAG = "asics";
 static bool s_inited;
 
@@ -63,16 +53,10 @@ asics_state_t asics_signer_get_state(void)
     return asics_cert_store_present() ? ASICS_STATE_PROVISIONED : ASICS_STATE_KEY_NO_CERT;
 }
 
-static esp_err_t hal_sign(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len, void *ctx)
-{
-    (void)ctx;
-    return asics_key_sign_digest(digest, sig, sig_size, sig_len);
-}
-
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
                      asics_write_cb_t write, void *ctx)
 {
-    if (!write || (!data && len) || !len_fits_u32(len) ||
+    if (!write || (!data && len) || !asics_len_fits_u32(len) ||
         asics_container_check_name(payload_name) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -100,7 +84,7 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     }
     mbedtls_x509_crt_init(dev_crt);
     uint8_t *blob = mem, *cms = mem + ASICS_CERT_BLOB_MAX;
-    cades_params_t p = {.signing_time = now, .sign = hal_sign};
+    cades_params_t p = {.signing_time = now, .sign = asics_key_sign_adapter};
     asics_der_t refs[CONFIG_ASICS_MAX_CHAIN];
     size_t cnt = 0, cms_len = 0;
 

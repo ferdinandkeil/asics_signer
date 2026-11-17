@@ -4,6 +4,7 @@
  */
 #include <string.h>
 #include "zip_writer.h"
+#include "asics_internal.h"
 #include "esp_rom_crc.h"
 #include "sdkconfig.h"
 
@@ -100,11 +101,9 @@ esp_err_t zip_writer_add_stored(zip_writer_t *zw, const char *name, const uint8_
     if (!name || (!data && len)) {
         return ESP_ERR_INVALID_ARG;
     }
-#if SIZE_MAX > 0xFFFFFFFFu
-    if (len > 0xFFFFFFFFu) { /* kein ZIP64 */
+    if (!asics_len_fits_u32(len)) { /* kein ZIP64 */
         return ESP_ERR_INVALID_ARG;
     }
-#endif
     size_t nl = strlen(name);
     if (nl == 0 || nl > 0xFFFF) {
         return ESP_ERR_INVALID_ARG;

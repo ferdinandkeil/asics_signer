@@ -22,3 +22,6 @@ esp_err_t asics_key_generate(void);
 esp_err_t asics_key_get_public(uint8_t pub[65]);
 /** SHA-256-Digest (32 Byte) signieren -> DER-kodierter ECDSA-Sig-Value (SEQUENCE{r,s}). */
 esp_err_t asics_key_sign_digest(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len);
+
+/** Adapter von asics_key_sign_digest() auf asics_sign_fn_t (cades_params_t.sign / csr_params_t.sign); ctx ungenutzt. */
+esp_err_t asics_key_sign_adapter(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len, void *ctx);

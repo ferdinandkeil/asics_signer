@@ -51,12 +51,6 @@ esp_err_t asics_provision_get_public_key(uint8_t pub[65])
     return asics_key_get_public(pub);
 }
 
-static esp_err_t sign_cb(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len, void *ctx)
-{
-    (void)ctx;
-    return asics_key_sign_digest(digest, sig, sig_size, sig_len);
-}
-
 esp_err_t asics_provision_create_csr(uint8_t *der, size_t size, size_t *len)
 {
     if (!der || !len) {
@@ -76,7 +70,7 @@ esp_err_t asics_provision_create_csr(uint8_t *der, size_t size, size_t *len)
     p.serial = s_serial;
     p.org = CONFIG_ASICS_SUBJECT_ORG;
     p.country = CONFIG_ASICS_SUBJECT_COUNTRY;
-    p.sign = sign_cb;
+    p.sign = asics_key_sign_adapter;
     esp_err_t err = asics_key_get_public(p.pub);
     if (err != ESP_OK) {
         return err;

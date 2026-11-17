@@ -14,6 +14,7 @@ set(srcs
     "src/cert_store.c"
     "src/time_source.c"
     "src/pem_util.c"
+    "src/backend/key_backend.c"
     "src/backend/backend_nvs.c"
     "src/backend/backend_se_stub.c")
 

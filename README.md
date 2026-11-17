@@ -110,7 +110,7 @@ everything that persists data goes through a small key/value store interface.
 | `src/cert_store.c` | Stores the device certificate and CA chain as one atomic blob; checks the key match, chain signatures, CA flags and validity periods |
 | `src/time_source.c` | Clock validity: `time()` must be ≥ `CONFIG_ASICS_MIN_TIME` (the build time by default) |
 | `src/pem_util.c` | PEM ↔ DER conversion for the CSR, the import and the console |
-| `src/backend/key_backend.h` | Key HAL: `init`, `has_key`, `generate`, `get_public`, `sign_digest` |
+| `src/backend/key_backend.h`, `key_backend.c` | Key HAL: `init`, `has_key`, `generate`, `get_public`, `sign_digest`, plus the shared `asics_key_sign_adapter` used by the CAdES and CSR builders |
 | `src/backend/backend_nvs.c` | Light backend: P-256 key in (encrypted) NVS, generated with the hardware RNG |
 | `src/backend/backend_se_stub.c` | Placeholder for a secure element / TPM 2.0 (returns `ESP_ERR_NOT_SUPPORTED`) |
 | `src/kv_store.h`, `src/kv_nvs.c`, `src/kv_ram.c` | Blob storage: NVS on the target, RAM for host tests |
