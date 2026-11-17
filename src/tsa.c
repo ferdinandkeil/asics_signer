@@ -142,26 +142,30 @@ static esp_err_t fetch_token(tsa_hook_ctx_t *c, const uint8_t *sig, size_t sig_l
     return ESP_OK;
 }
 
-esp_err_t tsa_attr_hook(der_t *d, const uint8_t *sig, size_t sig_len, void *ctx)
+esp_err_t tsa_fetch(tsa_hook_ctx_t *c, const uint8_t *sig, size_t sig_len)
 {
-    tsa_hook_ctx_t *c = ctx;
-    const uint8_t *token = NULL;
-    size_t token_len = 0;
     c->embedded = false;
-    c->err = fetch_token(c, sig, sig_len, &token, &token_len);
+    c->token = NULL;
+    c->token_len = 0;
+    c->err = fetch_token(c, sig, sig_len, &c->token, &c->token_len);
     if (c->err != ESP_OK) {
         ESP_LOGW(TAG, "kein Zeitstempel: %s", esp_err_to_name(c->err));
-        return c->mode == ASICS_TSA_REQUIRED ? c->err : ESP_OK; /* PREFERRED: nichts schreiben -> B-B */
     }
+    return c->err;
+}
+
+esp_err_t tsa_embed_hook(der_t *d, const uint8_t *sig, size_t sig_len, void *ctx)
+{
+    (void)sig; (void)sig_len;
+    tsa_hook_ctx_t *c = ctx;
     /* Attribute { OID signature-time-stamp, SET { TimeStampToken } } */
     size_t m = der_size(d);
-    der_raw(d, token, token_len);
+    der_raw(d, c->token, c->token_len);
     der_wrap(d, m, 0x31);
     der_oid(d, ASN1_OID_SIG_TIMESTAMP, sizeof(ASN1_OID_SIG_TIMESTAMP));
     der_wrap(d, m, 0x30);
     if (d->err) {
-        c->err = ESP_ERR_NO_MEM;
-        return ESP_ERR_NO_MEM; /* CMS-Puffer zu klein: auch bei PREFERRED ein harter Fehler (Konfiguration) */
+        return ESP_ERR_NO_MEM; /* passt nicht in den CMS-Puffer */
     }
     c->embedded = true;
     return ESP_OK;

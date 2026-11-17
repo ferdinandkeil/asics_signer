@@ -96,6 +96,35 @@ asics_state_t asics_signer_get_state(void)
     return asics_cert_store_present() ? ASICS_STATE_PROVISIONED : ASICS_STATE_KEY_NO_CERT;
 }
 
+/* Signierer mit Replay: die erste Signatur wird gemerkt und fuer weitere cades_build-Laeufe wiederverwendet */
+typedef struct {
+    uint8_t sig[ASICS_SIG_MAX_LEN];
+    uint8_t digest[32];
+    size_t len;
+    bool have;
+} sign_rec_t;
+
+static esp_err_t rec_sign(const uint8_t digest[32], uint8_t *sig, size_t sig_size, size_t *sig_len, void *ctx)
+{
+    sign_rec_t *r = ctx;
+    if (!r->have) {
+        esp_err_t e = asics_key_sign_adapter(digest, r->sig, sizeof(r->sig), &r->len, NULL);
+        if (e != ESP_OK) {
+            return e;
+        }
+        memcpy(r->digest, digest, 32);
+        r->have = true;
+    } else if (memcmp(digest, r->digest, 32) != 0) {
+        return ESP_ERR_INVALID_STATE; /* die Replay-Signatur gehoert zu anderen signierten Attributen */
+    }
+    if (sig_size < r->len) {
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(sig, r->sig, r->len);
+    *sig_len = r->len;
+    return ESP_OK;
+}
+
 esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
                      asics_write_cb_t write, void *ctx)
 {
@@ -164,19 +193,37 @@ esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t le
     p.dev_crt = dev_crt;
     p.ca_certs = &refs[1];
     p.ca_count = cnt - 1;
+    sign_rec_t rec = {0};
     if (mode != ASICS_TSA_OFF) {
         tsa.resp = malloc(CONFIG_ASICS_TSA_MAX_RESP);
         if (!tsa.resp) {
             err = ESP_ERR_NO_MEM;
             goto out;
         }
-        p.unsigned_attrs = tsa_attr_hook;
-        p.unsigned_ctx = &tsa;
+        p.sign = rec_sign; /* Signatur merken: die zweite Runde (mit Token) muss denselben Wert tragen */
+        p.sign_ctx = &rec;
     }
     mbedtls_sha256(data ? data : (const uint8_t *)"", len, p.payload_digest, 0);
-    err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);
+    err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);   /* Runde 1: CAdES-B-B */
     if (err != ESP_OK) {
-        goto out; /* auch REQUIRED + TSA-Fehler: kein Container, kein Callback */
+        goto out;
+    }
+    if (mode != ASICS_TSA_OFF) {
+        /* Zeitstempel ausserhalb von cades_build holen (flacher Stack, Netzwerk nicht im Builder-Frame). */
+        if (tsa_fetch(&tsa, rec.sig, rec.len) != ESP_OK) {
+            if (mode == ASICS_TSA_REQUIRED) {
+                err = tsa.err; /* kein Container, kein Callback */
+                goto out;
+            } /* PREFERRED: Runde 1 (B-B) wird ausgegeben, Grund in tsa.err */
+        } else {
+            /* Runde 2: identische signierte Attribute, gleicher Signaturwert (Replay), Token als unsigned attribute */
+            p.unsigned_attrs = tsa_embed_hook;
+            p.unsigned_ctx = &tsa;
+            err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);
+            if (err != ESP_OK) {
+                goto out;
+            }
+        }
     }
     if (res) {
         res->level = tsa.embedded ? ASICS_LEVEL_B_T : ASICS_LEVEL_B_B;

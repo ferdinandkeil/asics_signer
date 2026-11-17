@@ -270,8 +270,12 @@ buffer (`ASICS_TSA_MAX_RESP`, default 4096 bytes) and verification uses short-li
 and CA certificates (about 1 KB). An estimate for the default configuration with a TSA is about 25 KB of
 heap (certificate blob 4 KB, CMS buffer 9 KB, response 4 KB, attribute scratch 1.5 KB, certificates and
 mbedTLS state) plus the HTTP client; an `https://` TSA adds the TLS session (roughly 40 KB more). The
-hook runs on the caller's stack (about 2 KB on top of the existing use); keep at least 8 KB for the signing
-task. These numbers are estimates: the time-stamp path has not been run on hardware yet.
+time stamp is requested after the signature has been computed and outside the CAdES builder: `asics_sign_ex()` builds
+the CMS once, asks the TSA for a token over that signature and, if it got one, builds the CMS again with the same
+signature value (replayed) plus the token. Large buffers (TSA response, TSA CA, certificates) are on the heap.
+**Stack of the calling task** (estimates, to be measured on hardware): at least 4 KB with `OFF`, at least 8 KB with a
+time stamp over `http://`, and at least 12 KB over `https://` (TLS handshake). The numbers are estimates: the
+time-stamp path has not been run on hardware yet.
 
 The example `examples/basic_sign` has the console commands `wifi <ssid> <password>`
 (`WIFI_STORAGE_RAM`, nothing is stored), `tsa-mode off|preferred|required` and `sign`, which prints the
