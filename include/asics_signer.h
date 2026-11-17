@@ -142,8 +142,8 @@ asics_tsa_mode_t asics_get_tsa_mode(void);
  *  - ASICS_TSA_REQUIRED: bei TSA-Fehler kein Container und kein Callback-Aufruf, Rueckgabe = Fehlercode
  *    ASICS_ERR_TSA_UNAVAILABLE / _REJECTED / _INVALID.
  * Ohne TSA-URL oder ohne eingebettete TSA-CA ist ein Zeitstempel nicht moeglich (ASICS_ERR_TSA_UNAVAILABLE).
- * Stack des aufrufenden Tasks (Schaetzung, Messung auf Hardware steht aus): OFF mindestens 4 KB; mit
- * Zeitstempel ueber http:// mindestens 8 KB, ueber https:// (TLS-Handshake) mindestens 12 KB. Die TSA-Anfrage laeuft
+ * Stack des aufrufenden Tasks: OFF mindestens 4 KB; mit Zeitstempel ueber http:// mindestens 8 KB
+ * (auf Hardware gemessen: ca. 3,8 KB Verbrauch), ueber https:// (TLS-Handshake) mindestens 12 KB (Schaetzung). Die TSA-Anfrage laeuft
  * ausserhalb von cades_build; grosse Puffer (TSA-Antwort, TSA-CA) liegen auf dem Heap.
  * Der Aufruf blockiert bis zur TSA-Antwort (Timeout CONFIG_ASICS_TSA_TIMEOUT_MS); WLAN/Netz muss die
  * Anwendung bereitstellen.

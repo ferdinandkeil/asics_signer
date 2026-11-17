@@ -269,13 +269,14 @@ for the token is rejected at import time. While time-stamping, a call additional
 buffer (`ASICS_TSA_MAX_RESP`, default 4096 bytes) and verification uses short-lived heap for the parsed TSA
 and CA certificates (about 1 KB). An estimate for the default configuration with a TSA is about 25 KB of
 heap (certificate blob 4 KB, CMS buffer 9 KB, response 4 KB, attribute scratch 1.5 KB, certificates and
-mbedTLS state) plus the HTTP client; an `https://` TSA adds the TLS session (roughly 40 KB more). The
+mbedTLS state); measured on hardware over `http://` including the HTTP client: about 26 KB peak. An
+`https://` TSA adds the TLS session (estimated at roughly 40 KB more, not measured). The
 time stamp is requested after the signature has been computed and outside the CAdES builder: `asics_sign_ex()` builds
 the CMS once, asks the TSA for a token over that signature and, if it got one, builds the CMS again with the same
 signature value (replayed) plus the token. Large buffers (TSA response, TSA CA, certificates) are on the heap.
-**Stack of the calling task** (estimates, to be measured on hardware): at least 4 KB with `OFF`, at least 8 KB with a
-time stamp over `http://`, and at least 12 KB over `https://` (TLS handshake). The numbers are estimates: the
-time-stamp path has not been run on hardware yet.
+**Stack of the calling task:** at least 4 KB with `OFF` and at least 8 KB with a time stamp over `http://`.
+On hardware, signing with a time stamp over `http://` used about 3.8 KB of the console task's stack. For
+`https://` (TLS handshake), at least 12 KB is recommended; this value is an estimate and has not been measured.
 
 The example `examples/basic_sign` has the console commands `wifi <ssid> <password>`
 (`WIFI_STORAGE_RAM`, nothing is stored), `tsa-mode off|preferred|required` and `sign`, which prints the
@@ -408,6 +409,9 @@ Flash encryption was off and the key was stored in unencrypted NVS (development 
 | Signing on the device, validation with EU DSS | `TOTAL_PASSED`, `CAdES-BASELINE-B` (single CA and chain) |
 | Reset | no new key, same public key, chain retained |
 | Signing after reset without setting the clock | refused with `ESP_ERR_INVALID_STATE` |
+| Signing with time stamp (`required`), local sigstore TSA over Wi-Fi (`http://`) | `CAdES-B-T`; EU DSS: `TOTAL_PASSED`, `CAdES-BASELINE-T` |
+| TSA stopped, mode `preferred` | falls back to `CAdES-B-B` with `tsa_err` set; EU DSS: `TOTAL_PASSED`, `CAdES-BASELINE-B` |
+| TSA stopped, mode `required` | refused (`ASICS_ERR_TSA_UNAVAILABLE`), no container |
 
 Measured with a 36-byte payload:
 
@@ -415,6 +419,10 @@ Measured with a 36-byte payload:
 * Peak heap use is about 15 KB: about 9.2 KB is the fixed buffer, the rest is used by mbedTLS.
 * The console task used about 3.6 KB of its 8 KB stack.
 * The container is 1589 bytes with a single CA and 2405 bytes with the 4-certificate chain.
+* With a time stamp over `http://`, `asics_sign_ex()` takes about 1.1 s, most of it the network round trip to the TSA.
+  It uses about 26 KB of heap at peak, including the HTTP client, and about 3.8 KB of stack. The container is
+  3758 bytes (4-certificate chain plus token).
+* `https://` TSAs have not been tested on hardware.
 
 ## Limitations and roadmap
 
@@ -422,9 +430,8 @@ Measured with a 36-byte payload:
 * No compression; the `zip_writer` interface allows adding it later (for example uzlib)
 * No ZIP64 (payload < 4 GiB)
 * CAdES-B-T: one embedded TSA CA, HTTP(S) transport only (no custom transport), no TSA certificate
-  revocation checking, no long-term formats (B-LT, B-LTA); the HTTP transport has been compiled for the
-  target but not run on hardware, and `https://` TSAs additionally depend on a certificate bundle in the
-  application
+  revocation checking, no long-term formats (B-LT, B-LTA). `http://` was tested on hardware;
+  `https://` has not been, and additionally depends on a certificate bundle in the application
 * Not checked on import: `pathLen` constraints and revocation status
 * Production security features (Secure Boot v2, flash encryption, NVS encryption) have not yet been
   tested together with the component on hardware
