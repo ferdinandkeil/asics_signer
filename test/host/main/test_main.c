@@ -3,6 +3,7 @@
 #include <string.h>
 #include "test_support.h"
 
+void run_zip_tests(void);
 
 esp_err_t sink_write(const void *buf, size_t len, void *ctx)
 {
@@ -24,6 +25,7 @@ void sink_free(sink_t *s) { free(s->buf); memset(s, 0, sizeof(*s)); }
 void app_main(void)
 {
     UNITY_BEGIN();
+    run_zip_tests();
     int fails = UNITY_END();
     exit(fails ? 1 : 0);
 }

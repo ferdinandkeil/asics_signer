@@ -1,3 +1,13 @@
 menu "ASiC-S Signer"
 
+    config ASICS_PAYLOAD_NAME_MAX
+        int "Maximale Laenge des Nutzdatei-Namens"
+        default 100
+        range 8 255
+
+    config ASICS_WRITE_CHUNK
+        int "Maximale Chunk-Groesse pro Schreib-Callback (Bytes)"
+        default 4096
+        range 64 65536
+
 endmenu

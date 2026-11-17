@@ -1,7 +1,9 @@
 # ASiC-S Signaturkomponente (asics_signer)
 idf_build_get_property(target IDF_TARGET)
 
-set(srcs)
+set(srcs
+    "src/asics_container.c"
+    "src/zip_writer.c")
 
 if(target STREQUAL "linux")
     # --- Host-Build (Linux-Target, nur fuer Unit-Tests) ----------------------
