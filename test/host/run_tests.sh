@@ -5,6 +5,7 @@
 # und (falls Docker verfuegbar) mit EU-DSS validieren (tools/verify_dss.sh).
 # Voraussetzung: ESP-IDF >= 5.2.5 aktiviert (. export.sh), openssl, unzip.
 # Aufruf: test/host/run_tests.sh [arbeitsverzeichnis]
+# Optional: ASICS_TSA_CHECK=1 fuehrt zusaetzlich tools/tsa/check.sh aus (sigstore-Test-TSA in Docker)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
@@ -58,6 +59,11 @@ echo "== openssl ts -reply (Antwort der Test-TSA)"
 openssl ts -reply -in tsa_reply.tsr -text | tee tsa_reply.txt
 grep -q "Status: Granted" tsa_reply.txt && grep -q "Nonce: 0x0102030405060708" tsa_reply.txt || { echo "FEHLER: TSA-Antwort unerwartet"; exit 1; }
 openssl ts -verify -in tsa_reply.tsr -queryfile tsa_reply_request.tsq -CAfile "$pki/tsa_root.pem"
+
+if [ -n "${ASICS_TSA_CHECK:-}" ]; then   # optional: Integration gegen die sigstore-Test-TSA (Docker, Image-Pull noetig)
+  echo "== TSA-Integration (tools/tsa/check.sh)"
+  "$repo/tools/tsa/check.sh" "$pki" "$ASICS_TEST_OUT" "$work/build/asics_host_test.elf"
+fi
 
 echo "== openssl req -verify"
 openssl req -verify -noout -in device.csr.pem

@@ -539,6 +539,46 @@ static void test_tsa_mode_api(void)
     TEST_ASSERT_EQUAL(ASICS_TSA_OFF, asics_get_tsa_mode());
 }
 
+/* ---- Externe TSA (tools/tsa/check.sh): Antwort aus Datei gegen die Anfrage der Komponente pruefen ---- */
+static void test_tsa_external_response(void)
+{
+    const char *rq = getenv("ASICS_TSA_EXT_REQUEST"), *rs = getenv("ASICS_TSA_EXT_RESPONSE");
+    if (!rq || !rs) {
+        TEST_IGNORE_MESSAGE("ASICS_TSA_EXT_REQUEST/_RESPONSE nicht gesetzt (nur tools/tsa/check.sh)");
+    }
+    uint8_t req[256], resp[8192];
+    FILE *f = fopen(rq, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    size_t rl = fread(req, 1, sizeof(req), f);
+    fclose(f);
+    f = fopen(rs, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    size_t n = fread(resp, 1, sizeof(resp), f);
+    fclose(f);
+    /* Digest und Nonce aus der Anfrage lesen: SEQ { INT 1, SEQ { SEQ alg, OCTET digest }, [OID], INT nonce, BOOL } */
+    der_rd_t top = {req, req + rl}, r, mi, alg;
+    uint8_t tag;
+    const uint8_t *v, *digest, *nonce;
+    size_t vl, nl;
+    TEST_ASSERT_TRUE(der_rd_enter(&top, 0x30, &r) && der_rd_next(&r, &tag, &v, &vl, NULL, NULL));
+    TEST_ASSERT_TRUE(der_rd_enter(&r, 0x30, &mi) && der_rd_enter(&mi, 0x30, &alg));
+    TEST_ASSERT_TRUE(der_rd_next(&mi, &tag, &digest, &vl, NULL, NULL) && tag == 0x04 && vl == 32);
+    if (der_rd_peek(&r) == 0x06) { TEST_ASSERT_TRUE(der_rd_next(&r, &tag, &v, &vl, NULL, NULL)); }
+    TEST_ASSERT_TRUE(der_rd_next(&r, &tag, &nonce, &nl, NULL, NULL) && tag == 0x02);
+    tsa_expect_t e = {.digest = digest, .nonce = nonce, .nonce_len = nl, .now = time(NULL), .tolerance_s = 300};
+    tsa_resp_t pr;
+    tsa_token_t t;
+    time_t gt;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(resp, n, &pr));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(pr.token, pr.token_len, &t));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    size_t cl;
+    uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
+    esp_err_t err = tsa_verify_token(&t, ca, cl, gt);
+    free(ca);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -553,4 +593,5 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_sign_modes_ok);
     RUN_TEST(test_tsa_sign_faults);
     RUN_TEST(test_tsa_mode_api);
+    RUN_TEST(test_tsa_external_response);
 }
