@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 #include <string.h>
 #include "zip_writer.h"
 #include "esp_rom_crc.h"

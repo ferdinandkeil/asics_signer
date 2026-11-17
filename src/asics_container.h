@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 #pragma once
 #include "asics_internal.h"
 #include "asics_signer.h"

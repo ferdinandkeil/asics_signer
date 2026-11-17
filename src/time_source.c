@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 #include "time_source.h"
 #include "sdkconfig.h"
 

@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Duenner Wrapper um mbedtls/asn1write.h. mbedtls schreibt rueckwaerts
  * (vom Pufferende zum Anfang); dieselbe Konvention gilt hier: Elemente
  * werden in umgekehrter Reihenfolge geschrieben, Container danach mit

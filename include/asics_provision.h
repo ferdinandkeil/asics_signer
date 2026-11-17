@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * ASiC-S Provisionierung: CSR-Erzeugung, Zertifikatsimport, Konsole.
  * Es gibt bewusst keine Funktion, die einen vorhandenen Schluessel setzt oder ersetzt.
  */

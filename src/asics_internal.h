@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* Interne Typen und Konstanten (nicht oeffentlich). */
 #pragma once
 

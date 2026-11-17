@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * UART-Konsole: `asics status | csr | import`.
  * Es gibt keinen Befehl zum Setzen/Ersetzen des Schluessels.
  * Empfehlung: REPL-Task-Stack >= 6144 Byte.

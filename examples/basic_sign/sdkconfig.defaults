@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Entwicklungsaufbau ohne Flash Encryption (Produktion: aktivieren und Option entfernen)

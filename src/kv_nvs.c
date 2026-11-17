@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* NVS-Speicher (Zielsystem). NVS muss von der Anwendung initialisiert sein
  * (fuer die Light-Variante: nvs_flash_secure_init mit nvs_keys-Partition). */
 #include "kv_store.h"

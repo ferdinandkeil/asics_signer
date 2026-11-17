@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Minimaler streamender ZIP-Writer (nur STORE, kein ZIP64, kein Data Descriptor).
  *
  * Die Schnittstelle trennt Eintragsbeschreibung (zip_entry_t mit method,

@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * CAdES-B-B Detached (EN 319 122-1) als CMS ContentInfo/SignedData (DER).
  */
 #pragma once

@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Beispiel: CSV-Datensatz signieren und den ASiC-S-Container als Base64 ausgeben.
  *
  * Provisionierung ueber die UART-Konsole:

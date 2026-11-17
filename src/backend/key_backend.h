@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Schluessel-HAL. Der private Schluessel verlaesst das Backend nie.
  * Alle Backends (Light/NVS, SE-Stub, spaeter TPM) implementieren diese Schnittstelle.
  */

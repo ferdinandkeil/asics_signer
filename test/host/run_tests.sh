@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 # Host-Tests bauen und ausfuehren, danach Container/CSR mit unzip/zipinfo/openssl pruefen
 # und (falls Docker verfuegbar) mit EU-DSS validieren (tools/verify_dss.sh).
 # Voraussetzung: ESP-IDF >= 5.2.5 aktiviert (. export.sh), openssl, unzip.

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Ferdinand Keil
+// SPDX-License-Identifier: MIT
 package asics.dss;
 
 import eu.europa.esig.dss.diagnostic.DiagnosticData;

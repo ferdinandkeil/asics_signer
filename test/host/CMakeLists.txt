@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.16)
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(COMPONENTS main asics_signer unity)

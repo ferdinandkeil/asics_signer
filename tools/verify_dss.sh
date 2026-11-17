@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 # Validiert einen .asics-Container mit dem EU-DSS-basierten Docker-Image "asics-dss"
 # gegen eine lokale Test-CA als Vertrauensanker. Offline (--network none).
 # Exitcode 0 = TOTAL_PASSED.

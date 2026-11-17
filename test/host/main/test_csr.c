@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <stdio.h>
 #include <string.h>

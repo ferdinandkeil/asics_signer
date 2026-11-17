@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* PEM-Hilfen (Base64 per mbedtls): kodieren, dekodieren, zeilenweiser Leser. */
 #pragma once
 #include <stdbool.h>

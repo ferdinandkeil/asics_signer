@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Minimaler Blob-Speicher (Namespace per Kconfig). Auf dem Ziel NVS (kv_nvs.c),
  * im Host-Test ein RAM-Speicher (kv_ram.c).
  */

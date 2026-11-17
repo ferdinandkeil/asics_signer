@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* PKCS#10-CSR (RFC 2986), selbst mit asn1write kodiert, Signatur ueber HAL-Callback. */
 #pragma once
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 # Erzeugt eine Test-PKI fuer den Host-Test (alle Gueltigkeiten fest: 2024-01-01 .. 2044-01-01):
 #   Flache CA:      ca.pem                      -> dev.pem   (Kettenlaenge 2: Geraet + CA)
 #   Kette:          root.pem -> inter.pem -> issuing.pem -> dev_chain.pem

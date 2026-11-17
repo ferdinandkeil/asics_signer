@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Ferdinand Keil
+# SPDX-License-Identifier: MIT
 # ASiC-S Signaturkomponente (asics_signer)
 idf_build_get_property(target IDF_TARGET)
 

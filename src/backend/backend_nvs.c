@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * Light-Backend: ECDSA-P-256-Schluessel im NVS.
  * Sicherheit setzt verschluesseltes NVS (nvs_keys, geschuetzt durch Flash Encryption)
  * und Secure Boot v2 voraus. Der ESP32 hat kein HMAC-Peripheral, daher gibt es

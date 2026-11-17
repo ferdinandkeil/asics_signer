@@ -1,4 +1,8 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+/*
  * ASiC-S Signaturkomponente (ETSI EN 319 162-1) - oeffentliche API.
  *
  * Erzeugt aus Nutzdaten im Arbeitsspeicher einen ASiC-S-Container

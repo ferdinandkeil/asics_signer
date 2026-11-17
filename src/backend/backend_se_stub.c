@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* Stub fuer ein externes Secure Element / TPM 2.0: nicht implementiert. */
 #include "sdkconfig.h"
 #include "key_backend.h"

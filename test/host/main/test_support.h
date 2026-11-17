@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* Gemeinsame Hilfen der Host-Tests. */
 #pragma once
 #include <stddef.h>

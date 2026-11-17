@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* Zertifikatsspeicher (Geraetezertifikat + CA-Kette, DER), unabhaengig vom Key-Backend. */
 #pragma once
 #include <stdbool.h>

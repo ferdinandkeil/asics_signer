@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
 /* RAM-Speicher fuer den Host-Test (linux-Target). */
 #include <stdlib.h>
 #include <string.h>
