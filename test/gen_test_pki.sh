@@ -119,6 +119,7 @@ issue futureca futureca.pem dev.csr ext_dev dev_futureca.pem
 #   tsa_noeku.pem:  gleicher Schluessel, aber OHNE EKU (Negativtest; openssl ts -reply kann damit nicht
 #                   antworten, der Test baut die Antwort per openssl cms -sign)
 #   tsa_foreign.pem: gleicher Schluessel, EKU ok, aber von tsa_root2 (fremde CA)
+#   tsa_rsa.pem/.key: TSA-Zertifikat mit RSA-2048-Schluessel (EKU ok, von tsa_root)
 #   tsa.cnf:        Konfiguration fuer "openssl ts -reply" (Sektionen tsa_good, tsa_foreign)
 mkkey tsa_root;  newdb tsa_root 9000;  mkcsr tsa_root "/C=DE/O=Test Org/CN=Test TSA Root"
 issue tsa_root "" tsa_root.csr ext_root tsa_root.pem
@@ -128,6 +129,9 @@ mkkey tsa; mkcsr tsa "/C=DE/O=Test Org/CN=Test TSA"
 issue tsa_root tsa_root.pem tsa.csr ext_tsa tsa.pem
 issue tsa_root tsa_root.pem tsa.csr ext_dev tsa_noeku.pem
 issue tsa_root2 tsa_root2.pem tsa.csr ext_tsa tsa_foreign.pem
+openssl genrsa -out tsa_rsa.key 2048 2>/dev/null
+mkcsr tsa_rsa "/C=DE/O=Test Org/CN=Test TSA RSA"
+issue tsa_root tsa_root.pem tsa_rsa.csr ext_tsa tsa_rsa.pem
 : > tsa_serial; echo 01 > tsa_serial
 for s in good foreign; do
   case $s in good) cert=tsa.pem; chain=tsa_root.pem;; foreign) cert=tsa_foreign.pem; chain=tsa_root2.pem;; esac

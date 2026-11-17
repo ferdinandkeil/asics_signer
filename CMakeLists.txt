@@ -16,6 +16,7 @@ set(srcs
     "src/pem_util.c"
     "src/tsa_req.c"
     "src/tsa_resp.c"
+    "src/tsa_verify.c"
     "src/backend/key_backend.c"
     "src/backend/backend_nvs.c"
     "src/backend/backend_se_stub.c")

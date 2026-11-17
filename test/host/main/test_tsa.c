@@ -10,6 +10,7 @@
 #include "tsa_req.h"
 #include "tsa_host.h"
 #include "tsa_resp.h"
+#include "tsa_verify.h"
 
 static size_t unhex(const char *h, uint8_t *out)
 {
@@ -200,6 +201,121 @@ static void test_tsa_generalized_time(void)
     TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.Z", 16, &t));
 }
 
+/* ---- Token-Pruefung (Signatur, ESS, TSA-Zertifikat) ---- */
+static esp_err_t verify_exchange(exch_t *x, const char *ca_pem, time_t gen_time_override, bool use_override)
+{
+    tsa_resp_t r;
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x->resp, x->resp_len, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    time_t gt = 0;
+    tsa_expect_t e = expect_of(x, time(NULL), 300);
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    size_t cl;
+    uint8_t *ca = test_pem_to_der(ca_pem, &cl);
+    esp_err_t err = tsa_verify_token(&t, ca, cl, use_override ? gen_time_override : gt);
+    free(ca);
+    return err;
+}
+
+static void test_tsa_verify_good(void)
+{
+    exch_t x;
+    exchange(&x, 0x66);
+    TEST_ASSERT_EQUAL(ESP_OK, verify_exchange(&x, "tsa_root.pem", 0, false));
+    /* gueltig zur genTime: davor/danach (Zertifikate 2024..2044) nicht */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_exchange(&x, "tsa_root.pem", (time_t)1600000000, true));
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_exchange(&x, "tsa_root.pem", (time_t)2600000000LL, true));
+}
+
+static void test_tsa_verify_negative(void)
+{
+    exch_t x;
+    /* falsche (fremde) TSA-CA als Vertrauensanker */
+    exchange(&x, 0x67);
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_exchange(&x, "tsa_root2.pem", 0, false));
+    /* TSA-Zertifikat von fremder CA (Antwort aus Sektion tsa_foreign), gegen tsa_root geprueft */
+    exchange(&x, 0x68);
+    uint8_t req[128];
+    size_t rl;
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_build_request(x.digest, x.nonce, NULL, req, sizeof(req), &rl));
+    asics_tsa_host_set_section("tsa_foreign");
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, x.resp, sizeof(x.resp), &x.resp_len));
+    asics_tsa_host_set_section("tsa_good");
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_exchange(&x, "tsa_root.pem", 0, false));
+    TEST_ASSERT_EQUAL(ESP_OK, verify_exchange(&x, "tsa_root2.pem", 0, false));   /* Gegenprobe: mit passender CA ok */
+
+    /* manipulierte Signatur: letztes Signaturbyte (Token endet mit der Signatur) */
+    exchange(&x, 0x69);
+    tsa_resp_t r;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x.resp, x.resp_len, &r));
+    ((uint8_t *)r.token)[r.token_len - 3] ^= 0x01;
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_exchange(&x, "tsa_root.pem", 0, false));
+
+    /* manipulierter TSTInfo (message-digest im signierten Attribut stimmt nicht mehr): letztes TSTInfo-Byte (Nonce) */
+    exchange(&x, 0x6A);
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x.resp, x.resp_len, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    ((uint8_t *)t.tstinfo)[t.tstinfo_len - 1] ^= 0x01;
+    size_t cl;
+    uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_verify_token(&t, ca, cl, time(NULL)));
+    free(ca);
+}
+
+/* Eigene Token per openssl cms -sign (TSTInfo der Test-TSA, anderes Signaturzertifikat) */
+static size_t cms_token(const exch_t *x, const char *cert, const char *key, uint8_t *out, size_t cap)
+{
+    tsa_resp_t r;
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x->resp, x->resp_len, &r));
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    const char *pki = getenv("ASICS_TEST_PKI");
+    char dir[] = "/tmp/asics_cms_XXXXXX", in[256], tok[256], cmd[1200];
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    snprintf(in, sizeof(in), "%s/tst.der", dir);
+    snprintf(tok, sizeof(tok), "%s/tok.der", dir);
+    FILE *f = fopen(in, "wb");
+    fwrite(t.tstinfo, 1, t.tstinfo_len, f);
+    fclose(f);
+    snprintf(cmd, sizeof(cmd),
+             "openssl cms -sign -binary -nodetach -outform DER -in %s -econtent_type 1.2.840.113549.1.9.16.1.4 "
+             "-signer %s/%s -inkey %s/%s -certfile %s/tsa_root.pem -md sha256 -cades -out %s 2>/dev/null",
+             in, pki, cert, pki, key, pki, tok);
+    TEST_ASSERT_EQUAL(0, system(cmd));
+    f = fopen(tok, "rb");
+    size_t n = fread(out, 1, cap, f);
+    fclose(f);
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
+    TEST_ASSERT_EQUAL(0, system(cmd));
+    return n;
+}
+
+static esp_err_t verify_custom(const exch_t *x, const char *cert, const char *key)
+{
+    static uint8_t tok[8192];
+    size_t n = cms_token(x, cert, key, tok, sizeof(tok));
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(tok, n, &t));
+    size_t cl;
+    uint8_t *ca = test_pem_to_der("tsa_root.pem", &cl);
+    esp_err_t e = tsa_verify_token(&t, ca, cl, time(NULL));
+    free(ca);
+    return e;
+}
+
+static void test_tsa_verify_certificates(void)
+{
+    exch_t x;
+    exchange(&x, 0x6B);
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom(&x, "tsa.pem", "tsa.key"));              /* Kontrolle: EC mit EKU */
+    TEST_ASSERT_EQUAL(ESP_OK, verify_custom(&x, "tsa_rsa.pem", "tsa_rsa.key"));      /* RSA PKCS#1 v1.5 */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom(&x, "tsa_noeku.pem", "tsa.key"));   /* ohne EKU */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom(&x, "tsa_foreign.pem", "tsa.key")); /* fremde CA */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, verify_custom(&x, "dev.pem", "dev.key"));         /* Geraetezertifikat: keine EKU */
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -208,4 +324,7 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_resp_good);
     RUN_TEST(test_tsa_resp_bad_structure);
     RUN_TEST(test_tsa_generalized_time);
+    RUN_TEST(test_tsa_verify_good);
+    RUN_TEST(test_tsa_verify_negative);
+    RUN_TEST(test_tsa_verify_certificates);
 }

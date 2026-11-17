@@ -1,0 +1,264 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Ferdinand Keil
+ * SPDX-License-Identifier: MIT
+ */
+#include <stdlib.h>
+#include <string.h>
+#include "tsa_verify.h"
+#include "asics_signer.h"
+#include "cert_store.h"
+#include "esp_log.h"
+#include "mbedtls/md.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/x509_crt.h"
+
+static const char *TAG = "asics_tsa";
+
+static const uint8_t OID_CT_TSTINFO[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x01, 0x04};
+static const uint8_t OID_CONTENT_TYPE[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x03};
+static const uint8_t OID_MSG_DIGEST[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x04};
+static const uint8_t OID_SIGNING_CERT[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0C};
+static const uint8_t OID_SIGNING_CERT_V2[] = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x2F};
+static const uint8_t OID_SHA1[] = {0x2B, 0x0E, 0x03, 0x02, 0x1A};
+static const uint8_t OID_SHA256[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
+static const uint8_t OID_SHA384[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02};
+static const uint8_t OID_SHA512[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03};
+static const uint8_t OID_EXT_EKU[] = {0x55, 0x1D, 0x25};
+static const uint8_t OID_KP_TIMESTAMPING[] = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08};
+
+#define FAIL(msg) do { ESP_LOGE(TAG, "%s", msg); err = ASICS_ERR_TSA_INVALID; goto done; } while (0)
+#define OIDEQ(v, vl, o) ((vl) == sizeof(o) && memcmp((v), (o), sizeof(o)) == 0)
+
+/* Hash-Algorithmus aus OID; sha1 nur fuer ESS (allow_sha1) */
+static mbedtls_md_type_t md_from_oid(const uint8_t *v, size_t vl, bool allow_sha1)
+{
+    if (OIDEQ(v, vl, OID_SHA256)) return MBEDTLS_MD_SHA256;
+    if (OIDEQ(v, vl, OID_SHA384)) return MBEDTLS_MD_SHA384;
+    if (OIDEQ(v, vl, OID_SHA512)) return MBEDTLS_MD_SHA512;
+    if (allow_sha1 && OIDEQ(v, vl, OID_SHA1)) return MBEDTLS_MD_SHA1;
+    return MBEDTLS_MD_NONE;
+}
+
+static bool md_hash(mbedtls_md_type_t md, const uint8_t *in, size_t len, uint8_t *out, size_t *olen)
+{
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(md);
+    if (!info) return false;
+    *olen = mbedtls_md_get_size(info);
+    return mbedtls_md(info, in, len, out) == 0;
+}
+
+/* Extensions des TSA-Zertifikats: EKU kritisch und ausschliesslich timeStamping */
+static bool eku_ok(const mbedtls_x509_crt *c)
+{
+    der_rd_t top = {c->v3_ext.p, c->v3_ext.p + c->v3_ext.len}, exts, ext;
+    if (c->v3_ext.p == NULL || !der_rd_enter(&top, 0x30, &exts)) {
+        return false;
+    }
+    while (!der_rd_done(&exts)) {
+        uint8_t tag;
+        const uint8_t *v;
+        size_t vl;
+        if (!der_rd_enter(&exts, 0x30, &ext) || !der_rd_next(&ext, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
+            return false;
+        }
+        if (!OIDEQ(v, vl, OID_EXT_EKU)) {
+            continue;
+        }
+        bool critical = false;
+        if (der_rd_peek(&ext) == 0x01) {
+            if (!der_rd_next(&ext, &tag, &v, &vl, NULL, NULL) || vl != 1) return false;
+            critical = v[0] != 0;
+        }
+        der_rd_t oct, seq;
+        if (!critical || !der_rd_enter(&ext, 0x04, &oct) || !der_rd_enter(&oct, 0x30, &seq)) {
+            return false;
+        }
+        if (!der_rd_next(&seq, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, OID_KP_TIMESTAMPING)) {
+            return false;
+        }
+        return der_rd_done(&seq); /* nur diese EKU */
+    }
+    return false;
+}
+
+esp_err_t tsa_verify_token(const tsa_token_t *t, const uint8_t *ca_der, size_t ca_len, time_t gen_time)
+{
+    esp_err_t err = ASICS_ERR_TSA_INVALID;
+    mbedtls_x509_crt *tsa = calloc(1, sizeof(*tsa));
+    mbedtls_x509_crt *ca = calloc(1, sizeof(*ca));
+    uint8_t *attrs_copy = NULL;
+    if (!tsa || !ca) {
+        free(tsa); free(ca);
+        return ESP_ERR_NO_MEM;
+    }
+    mbedtls_x509_crt_init(tsa);
+    mbedtls_x509_crt_init(ca);
+
+    /* --- SignerInfo --- */
+    der_rd_t si = t->signer_info, sid_rd, alg, attrs, sigalg;
+    uint8_t tag;
+    const uint8_t *v, *attrs_tlv, *sid_tlv;
+    size_t vl, attrs_tlen, sid_tlen;
+    if (!der_rd_next(&si, &tag, &v, &vl, NULL, NULL) || tag != 0x02 || vl != 1 || v[0] != 1) {
+        FAIL("SignerInfo: Version != 1");
+    }
+    if (!der_rd_next(&si, &tag, &v, &vl, &sid_tlv, &sid_tlen) || (tag != 0x30 && tag != 0x80)) {
+        FAIL("SignerInfo: sid defekt");
+    }
+    bool sid_is_issuer_serial = tag == 0x30;
+    const uint8_t *sid_val = v;
+    size_t sid_vlen = vl;
+    (void)sid_rd; (void)sid_tlv; (void)sid_tlen;
+    if (!der_rd_enter(&si, 0x30, &alg) || !der_rd_next(&alg, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
+        FAIL("SignerInfo: digestAlgorithm defekt");
+    }
+    mbedtls_md_type_t md = md_from_oid(v, vl, false);
+    if (md == MBEDTLS_MD_NONE) {
+        FAIL("SignerInfo: Digest-Algorithmus nicht unterstuetzt");
+    }
+    if (der_rd_peek(&si) != 0xA0 || !der_rd_next(&si, &tag, &v, &vl, &attrs_tlv, &attrs_tlen)) {
+        FAIL("SignerInfo: signedAttrs fehlen");
+    }
+    attrs.p = v;
+    attrs.end = v + vl;
+    if (!der_rd_enter(&si, 0x30, &sigalg)) {
+        FAIL("SignerInfo: signatureAlgorithm defekt");
+    }
+    const uint8_t *sig;
+    size_t sig_len;
+    if (!der_rd_next(&si, &tag, &sig, &sig_len, NULL, NULL) || tag != 0x04) {
+        FAIL("SignerInfo: signature defekt");
+    }
+
+    /* --- Signed Attributes: content-type, message-digest, ESS --- */
+    bool got_ct = false, got_md = false, got_ess = false;
+    uint8_t ess_hash[64];
+    size_t ess_hash_len = 0;
+    mbedtls_md_type_t ess_md = MBEDTLS_MD_SHA256;
+    while (!der_rd_done(&attrs)) {
+        der_rd_t at, vals;
+        if (!der_rd_enter(&attrs, 0x30, &at) || !der_rd_next(&at, &tag, &v, &vl, NULL, NULL) || tag != 0x06) {
+            FAIL("signedAttrs defekt");
+        }
+        const uint8_t *oid = v;
+        size_t oid_len = vl;
+        if (!der_rd_enter(&at, 0x31, &vals)) {
+            FAIL("signedAttrs: Attributwert defekt");
+        }
+        if (OIDEQ(oid, oid_len, OID_CONTENT_TYPE)) {
+            if (!der_rd_next(&vals, &tag, &v, &vl, NULL, NULL) || tag != 0x06 || !OIDEQ(v, vl, OID_CT_TSTINFO)) {
+                FAIL("signedAttrs: content-type != id-ct-TSTInfo");
+            }
+            got_ct = true;
+        } else if (OIDEQ(oid, oid_len, OID_MSG_DIGEST)) {
+            uint8_t h[64];
+            size_t hl;
+            if (!der_rd_next(&vals, &tag, &v, &vl, NULL, NULL) || tag != 0x04 ||
+                !md_hash(md, t->tstinfo, t->tstinfo_len, h, &hl) || vl != hl || memcmp(h, v, hl) != 0) {
+                FAIL("signedAttrs: message-digest stimmt nicht mit dem TSTInfo ueberein");
+            }
+            got_md = true;
+        } else if (OIDEQ(oid, oid_len, OID_SIGNING_CERT) || OIDEQ(oid, oid_len, OID_SIGNING_CERT_V2)) {
+            bool v2 = OIDEQ(oid, oid_len, OID_SIGNING_CERT_V2);
+            der_rd_t sc, certs, id;
+            if (!der_rd_enter(&vals, 0x30, &sc) || !der_rd_enter(&sc, 0x30, &certs) || !der_rd_enter(&certs, 0x30, &id)) {
+                FAIL("ESS signing-certificate defekt");
+            }
+            ess_md = v2 ? MBEDTLS_MD_SHA256 : MBEDTLS_MD_SHA1;
+            if (der_rd_peek(&id) == 0x30) { /* hashAlgorithm (nur v2; Default SHA-256) */
+                der_rd_t a;
+                if (!v2 || !der_rd_enter(&id, 0x30, &a) || !der_rd_next(&a, &tag, &v, &vl, NULL, NULL) || tag != 0x06 ||
+                    (ess_md = md_from_oid(v, vl, false)) == MBEDTLS_MD_NONE) {
+                    FAIL("ESS: hashAlgorithm nicht unterstuetzt");
+                }
+            }
+            if (!der_rd_next(&id, &tag, &v, &vl, NULL, NULL) || tag != 0x04 || vl > sizeof(ess_hash)) {
+                FAIL("ESS: certHash defekt");
+            }
+            memcpy(ess_hash, v, vl);
+            ess_hash_len = vl;
+            got_ess = true;
+        }
+    }
+    if (!got_ct || !got_md || !got_ess) {
+        FAIL("signedAttrs unvollstaendig (content-type, message-digest, ESS erforderlich)");
+    }
+
+    /* --- TSA-Zertifikat im Token suchen: ESS-Hash und sid muessen passen --- */
+    der_rd_t certs = t->certs;
+    bool found = false;
+    while (!der_rd_done(&certs)) {
+        const uint8_t *ctlv;
+        size_t ctlen;
+        if (!der_rd_next(&certs, &tag, &v, &vl, &ctlv, &ctlen) || tag != 0x30) {
+            FAIL("certificates defekt");
+        }
+        uint8_t h[64];
+        size_t hl;
+        if (!md_hash(ess_md, ctlv, ctlen, h, &hl) || hl != ess_hash_len || memcmp(h, ess_hash, hl) != 0) {
+            continue;
+        }
+        if (mbedtls_x509_crt_parse_der(tsa, ctlv, ctlen) != 0) {
+            FAIL("TSA-Zertifikat nicht parsebar");
+        }
+        found = true;
+        break;
+    }
+    if (!found) {
+        FAIL("TSA-Zertifikat (ESS-Referenz) nicht im Token enthalten");
+    }
+    if (sid_is_issuer_serial) { /* sid = IssuerAndSerialNumber { issuer Name, serial INTEGER } */
+        der_rd_t isr = {sid_val, sid_val + sid_vlen};
+        const uint8_t *itlv, *sv;
+        size_t itlen, svl;
+        if (!der_rd_next(&isr, &tag, &v, &vl, &itlv, &itlen) || tag != 0x30 ||
+            !der_rd_next(&isr, &tag, &sv, &svl, NULL, NULL) || tag != 0x02 ||
+            itlen != tsa->issuer_raw.len || memcmp(itlv, tsa->issuer_raw.p, itlen) != 0 ||
+            svl != tsa->serial.len || memcmp(sv, tsa->serial.p, svl) != 0) {
+            FAIL("SignerInfo.sid passt nicht zum TSA-Zertifikat");
+        }
+    }
+
+    /* --- Signatur ueber die DER-Signed-Attributes (Tag 0x31 statt 0xA0) --- */
+    attrs_copy = malloc(attrs_tlen);
+    if (!attrs_copy) {
+        err = ESP_ERR_NO_MEM;
+        goto done;
+    }
+    memcpy(attrs_copy, attrs_tlv, attrs_tlen);
+    attrs_copy[0] = 0x31;
+    uint8_t dg[64];
+    size_t dgl;
+    if (!md_hash(md, attrs_copy, attrs_tlen, dg, &dgl) ||
+        mbedtls_pk_verify(&tsa->pk, md, dg, dgl, sig, sig_len) != 0) {
+        FAIL("TSA-Signatur ungueltig");
+    }
+
+    /* --- Zertifikatspruefung --- */
+    if (!eku_ok(tsa)) {
+        FAIL("TSA-Zertifikat: kritische EKU timeStamping (ausschliesslich) fehlt");
+    }
+    if (mbedtls_x509_crt_parse_der(ca, ca_der, ca_len) != 0 || ca->next != NULL) {
+        FAIL("eingebettete TSA-CA nicht parsebar");
+    }
+    if (mbedtls_x509_crt_get_ca_istrue(ca) != 1) {
+        FAIL("eingebettete TSA-CA hat kein CA-Flag");
+    }
+    uint32_t flags = 0;
+    int rc = mbedtls_x509_crt_verify(tsa, ca, NULL, NULL, &flags, NULL, NULL);
+    flags &= ~(uint32_t)(MBEDTLS_X509_BADCERT_EXPIRED | MBEDTLS_X509_BADCERT_FUTURE);
+    if ((rc != 0 && rc != MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) || flags != 0) {
+        FAIL("TSA-Zertifikat nicht von der eingebetteten TSA-CA signiert");
+    }
+    if (asics_cert_check_validity_crt(tsa, gen_time) != ESP_OK || asics_cert_check_validity_crt(ca, gen_time) != ESP_OK) {
+        FAIL("TSA-Zertifikat oder TSA-CA zur genTime nicht gueltig");
+    }
+    err = ESP_OK;
+done:
+    free(attrs_copy);
+    mbedtls_x509_crt_free(tsa);
+    mbedtls_x509_crt_free(ca);
+    free(tsa);
+    free(ca);
+    return err;
+}
