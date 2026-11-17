@@ -33,6 +33,9 @@ if(target STREQUAL "linux")
         PRIV_REQUIRES esp_rom esp_hw_support log)
 else()
     set(priv_srcs "src/kv_nvs.c")
+    if(CONFIG_ASICS_ENABLE_CONSOLE)
+        list(APPEND priv_srcs "src/console/asics_console.c")
+    endif()
     idf_component_register(
         SRCS ${srcs} ${priv_srcs}
         INCLUDE_DIRS "include"

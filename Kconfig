@@ -112,4 +112,8 @@ menu "ASiC-S Signer"
         string "CSR-Subject: Land (C, 2 Buchstaben), leer = weglassen"
         default ""
 
+    config ASICS_ENABLE_CONSOLE
+        bool "UART-Konsolenbefehl 'asics' (status/csr/import)"
+        default y
+
 endmenu
