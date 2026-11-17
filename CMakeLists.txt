@@ -3,7 +3,9 @@ idf_build_get_property(target IDF_TARGET)
 
 set(srcs
     "src/asics_container.c"
-    "src/zip_writer.c")
+    "src/zip_writer.c"
+    "src/der_writer.c"
+    "src/cades_builder.c")
 
 if(target STREQUAL "linux")
     # --- Host-Build (Linux-Target, nur fuer Unit-Tests) ----------------------

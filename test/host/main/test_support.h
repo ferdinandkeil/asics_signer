@@ -11,3 +11,10 @@
 typedef struct { uint8_t *buf; size_t len; size_t cap; int calls; int fail_at; } sink_t;
 esp_err_t sink_write(const void *buf, size_t len, void *ctx);
 void sink_free(sink_t *s);
+
+/** Datei aus Verzeichnis ASICS_TEST_PKI lesen (malloc). */
+uint8_t *test_read_pki(const char *name, size_t *len);
+/** PEM->DER (malloc). */
+uint8_t *test_pem_to_der(const char *name, size_t *len);
+/** Ausgabedatei in ASICS_TEST_OUT schreiben. */
+void test_write_out(const char *name, const void *data, size_t len);
