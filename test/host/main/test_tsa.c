@@ -9,6 +9,7 @@
 #include "asics_signer.h"
 #include "tsa_req.h"
 #include "tsa_host.h"
+#include "tsa_resp.h"
 
 static size_t unhex(const char *h, uint8_t *out)
 {
@@ -91,9 +92,120 @@ static void test_tsa_host_transport(void)
     asics_tsa_host_set_hook(NULL, NULL);
 }
 
+/* ---- Antwort-Parser und TSTInfo-Pruefung (Antworten von openssl ts -reply) ---- */
+typedef struct {
+    uint8_t digest[32], nonce[8];
+    uint8_t resp[4096];
+    size_t resp_len;
+} exch_t;
+
+static void exchange(exch_t *x, uint8_t fill)
+{
+    uint8_t req[128];
+    size_t rl;
+    memset(x->digest, fill, 32);
+    for (int i = 0; i < 8; i++) x->nonce[i] = (uint8_t)(0x70 + i);
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_build_request(x->digest, x->nonce, NULL, req, sizeof(req), &rl));
+    asics_tsa_host_set_hook(NULL, NULL);
+    asics_tsa_host_set_section("tsa_good");
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, x->resp, sizeof(x->resp), &x->resp_len));
+}
+
+static tsa_expect_t expect_of(const exch_t *x, time_t now, unsigned tol)
+{
+    return (tsa_expect_t){.digest = x->digest, .nonce = x->nonce, .nonce_len = 8, .now = now, .tolerance_s = tol};
+}
+
+static void test_tsa_resp_good(void)
+{
+    exch_t x;
+    exchange(&x, 0x33);
+    tsa_resp_t r;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x.resp, x.resp_len, &r));
+    TEST_ASSERT_EQUAL_HEX8(0x30, r.token[0]);
+    tsa_token_t t;
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_token(r.token, r.token_len, &t));
+    TEST_ASSERT_TRUE(t.tstinfo_len > 40);
+    time_t now = time(NULL), gt = 0;
+    tsa_expect_t e = expect_of(&x, now, 300);
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    TEST_ASSERT_TRUE(gt >= now - 5 && gt <= now + 5);
+    /* genTime-Toleranz */
+    e = expect_of(&x, now + 1000, 300);
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e = expect_of(&x, now - 1000, 300);
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    e = expect_of(&x, now + 1000, 3000);
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    /* falscher Imprint / falsche Nonce */
+    uint8_t other[32];
+    memset(other, 0x44, sizeof(other));
+    e = expect_of(&x, now, 300);
+    e.digest = other;
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    uint8_t n2[8] = {0};
+    e = expect_of(&x, now, 300);
+    e.nonce = n2;
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+    /* verkuerzte Nonce (Praefix) darf nicht passen */
+    e = expect_of(&x, now, 300);
+    e.nonce_len = 7;
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_check_tstinfo(t.tstinfo, t.tstinfo_len, &e, &gt));
+}
+
+static void test_tsa_resp_bad_structure(void)
+{
+    exch_t x;
+    exchange(&x, 0x55);
+    tsa_resp_t r;
+    /* abgeschnitten / Rest / Muell */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_response(x.resp, x.resp_len - 10, &r));
+    x.resp[x.resp_len] = 0;
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_response(x.resp, x.resp_len + 1, &r));
+    const uint8_t junk[] = {0xff, 0x00, 0x01};
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_response(junk, sizeof(junk), &r));
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_response(x.resp, 0, &r));
+    /* Status rejection(2) ohne Token */
+    const uint8_t rej[] = {0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x02};
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_REJECTED, tsa_parse_response(rej, sizeof(rej), &r));
+    /* granted(0) aber kein Token */
+    const uint8_t notok[] = {0x30, 0x05, 0x30, 0x03, 0x02, 0x01, 0x00};
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_response(notok, sizeof(notok), &r));
+    /* Token kaputt: eContentType veraendert */
+    exchange(&x, 0x55);
+    TEST_ASSERT_EQUAL(ESP_OK, tsa_parse_response(x.resp, x.resp_len, &r));
+    uint8_t *tok = (uint8_t *)r.token;
+    tsa_token_t t;
+    for (size_t i = 0; i + 13 < r.token_len; i++) {   /* id-ct-TSTInfo-OID finden und zerstoeren */
+        if (tok[i] == 0x06 && tok[i + 1] == 0x0B && tok[i + 10] == 0x10 && tok[i + 12] == 0x04) {
+            tok[i + 12] = 0x05;
+            break;
+        }
+    }
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_INVALID, tsa_parse_token(r.token, r.token_len, &t));
+}
+
+static void test_tsa_generalized_time(void)
+{
+    time_t t;
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"20260115120000Z", 15, &t));
+    TEST_ASSERT_EQUAL(1768478400, t);
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.123Z", 19, &t));
+    TEST_ASSERT_EQUAL(1768478400, t);
+    TEST_ASSERT_TRUE(tsa_parse_generalized_time((const uint8_t *)"19700101000000Z", 15, &t));
+    TEST_ASSERT_EQUAL(0, t);
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000", 14, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"2026011512000aZ", 15, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20261315120000Z", 15, &t));
+    TEST_ASSERT_FALSE(tsa_parse_generalized_time((const uint8_t *)"20260115120000.Z", 16, &t));
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
     RUN_TEST(test_tsa_request_errors);
     RUN_TEST(test_tsa_host_transport);
+    RUN_TEST(test_tsa_resp_good);
+    RUN_TEST(test_tsa_resp_bad_structure);
+    RUN_TEST(test_tsa_generalized_time);
 }
