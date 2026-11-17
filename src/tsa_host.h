@@ -11,6 +11,9 @@
 /** Nur Host-Test: Kconfig-Default des TSA-Modus ersetzen (setzt den effektiven Modus zurueck). */
 void asics_host_set_tsa_default(asics_tsa_mode_t mode);
 
+/** Nur Host-Test: Groesse des CMS-Ausgabepuffers in asics_sign_ex ueberschreiben (0 = CONFIG_ASICS_CMS_BUF_SIZE). */
+void asics_host_set_cms_cap(size_t cap);
+
 /** Test-Hook: ersetzt den Transport vollstaendig (NULL = Standard: openssl ts -reply). */
 typedef esp_err_t (*asics_tsa_host_hook_t)(const uint8_t *req, size_t req_len, uint8_t *resp, size_t resp_size,
                                            size_t *resp_len, void *ctx);

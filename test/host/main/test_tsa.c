@@ -795,6 +795,37 @@ static void test_tsa_big_ca(void)
     free(big_pem);
 }
 
+/* Token passt nicht in den CMS-Puffer: PREFERRED gibt B-B aus (tsa_err = NO_MEM), REQUIRED liefert den Fehler */
+static void test_tsa_cms_buffer_too_small(void)
+{
+    static const uint8_t data[] = "x;y\n";
+    asics_sign_result_t res;
+    tsa_setup(ASICS_TSA_OFF);
+    sink_t b = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &b, &res));
+    size_t cap = b.len;                       /* groesser als das B-B-CMS, aber kleiner als B-B + Token */
+    sink_free(&b);
+
+    asics_host_set_cms_cap(cap);
+    asics_set_tsa_mode(ASICS_TSA_PREFERRED);
+    sink_t s = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+    TEST_ASSERT_EQUAL(ASICS_LEVEL_B_B, res.level);
+    TEST_ASSERT_EQUAL_HEX(ESP_ERR_NO_MEM, res.tsa_err);
+    TEST_ASSERT_TRUE(s.calls > 0 && !contains(s.buf, s.len, OID_STS, sizeof(OID_STS)));
+    sink_free(&s);
+
+    asics_set_tsa_mode(ASICS_TSA_REQUIRED);
+    TEST_ASSERT_EQUAL_HEX(ESP_ERR_NO_MEM, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+    TEST_ASSERT_EQUAL(0, s.calls);
+    sink_free(&s);
+
+    asics_host_set_cms_cap(0);                /* Gegenprobe: normaler Puffer -> B-T */
+    TEST_ASSERT_EQUAL(ESP_OK, asics_sign_ex("t.csv", data, sizeof(data) - 1, sink_write, &s, &res));
+    TEST_ASSERT_EQUAL(ASICS_LEVEL_B_T, res.level);
+    sink_free(&s);
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
@@ -812,6 +843,7 @@ void run_tsa_tests(void)
     RUN_TEST(test_tsa_policy_check);
     RUN_TEST(test_tsa_sign_modes_ok);
     RUN_TEST(test_tsa_sign_faults);
+    RUN_TEST(test_tsa_cms_buffer_too_small);
     RUN_TEST(test_tsa_big_ca);
     RUN_TEST(test_tsa_mode_api);
     RUN_TEST(test_tsa_external_response);

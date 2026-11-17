@@ -96,6 +96,23 @@ asics_state_t asics_signer_get_state(void)
     return asics_cert_store_present() ? ASICS_STATE_PROVISIONED : ASICS_STATE_KEY_NO_CERT;
 }
 
+#if CONFIG_IDF_TARGET_LINUX
+static size_t s_cms_cap_override;
+void asics_host_set_cms_cap(size_t cap)   /* Nur Host-Test: CMS-Puffer kuenstlich verkleinern (0 = Kconfig) */
+{
+    s_cms_cap_override = cap;
+}
+static size_t cms_cap(void)
+{
+    return s_cms_cap_override ? s_cms_cap_override : CONFIG_ASICS_CMS_BUF_SIZE;
+}
+#else
+static inline size_t cms_cap(void)
+{
+    return CONFIG_ASICS_CMS_BUF_SIZE;
+}
+#endif
+
 /* Signierer mit Replay: die erste Signatur wird gemerkt und fuer weitere cades_build-Laeufe wiederverwendet */
 typedef struct {
     uint8_t sig[ASICS_SIG_MAX_LEN];
@@ -204,7 +221,7 @@ esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t le
         p.sign_ctx = &rec;
     }
     mbedtls_sha256(data ? data : (const uint8_t *)"", len, p.payload_digest, 0);
-    err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);   /* Runde 1: CAdES-B-B */
+    err = cades_build(&p, cms, cms_cap(), &cms_len);   /* Runde 1: CAdES-B-B */
     if (err != ESP_OK) {
         goto out;
     }
@@ -219,9 +236,20 @@ esp_err_t asics_sign_ex(const char *payload_name, const uint8_t *data, size_t le
             /* Runde 2: identische signierte Attribute, gleicher Signaturwert (Replay), Token als unsigned attribute */
             p.unsigned_attrs = tsa_embed_hook;
             p.unsigned_ctx = &tsa;
-            err = cades_build(&p, cms, CONFIG_ASICS_CMS_BUF_SIZE, &cms_len);
+            err = cades_build(&p, cms, cms_cap(), &cms_len);
             if (err != ESP_OK) {
-                goto out;
+                if (mode == ASICS_TSA_REQUIRED) {
+                    goto out; /* REQUIRED: z. B. ESP_ERR_NO_MEM (CMS-Puffer zu klein fuer das Token) */
+                }
+                /* PREFERRED: Fallback auf B-B (gleiche Signatur per Replay), Grund in tsa.err */
+                ESP_LOGW(TAG, "Token passt nicht in den CMS-Puffer (%s) - gebe B-B aus", esp_err_to_name(err));
+                tsa.err = err;
+                tsa.embedded = false;
+                p.unsigned_attrs = NULL;
+                err = cades_build(&p, cms, cms_cap(), &cms_len);
+                if (err != ESP_OK) {
+                    goto out;
+                }
             }
         }
     }

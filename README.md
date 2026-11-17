@@ -222,8 +222,8 @@ esp_err_t err = asics_sign_ex("record.csv", csv, csv_len, write_cb, ctx, &res);
 | Mode | Behaviour |
 |------|-----------|
 | `ASICS_TSA_OFF` | plain CAdES-B-B, byte-for-byte the previous output; the TSA is never contacted |
-| `ASICS_TSA_PREFERRED` | try the time stamp; on any TSA error produce a B-B container, return `ESP_OK`, `res.level = ASICS_LEVEL_B_B`, `res.tsa_err` = reason |
-| `ASICS_TSA_REQUIRED` | on any TSA error produce **no** container and make **no** write-callback call; the error code is returned |
+| `ASICS_TSA_PREFERRED` | try the time stamp; on any TSA error (including a token that does not fit into the CMS buffer, `res.tsa_err = ESP_ERR_NO_MEM`) produce a B-B container, return `ESP_OK`, `res.level = ASICS_LEVEL_B_B`, `res.tsa_err` = reason |
+| `ASICS_TSA_REQUIRED` | on any TSA error (including `ESP_ERR_NO_MEM` for the CMS buffer) produce **no** container and make **no** write-callback call; the error code is returned |
 
 The initial mode is the Kconfig default (`OFF` unless configured otherwise). `ASICS_TSA_DEFAULT` (value 0)
 means "use the Kconfig default": it is what `asics_signer_init(NULL)` and a zero-initialised
