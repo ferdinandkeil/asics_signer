@@ -600,11 +600,31 @@ static void test_tsa_external_response(void)
     TEST_ASSERT_EQUAL(ESP_OK, err);
 }
 
+/* Sektionsname und Pfad gehen nie durch eine Shell: ungueltige Namen fallen auf tsa_good zurueck, Sonderzeichen
+ * fuehren nicht zu Kommandoausfuehrung */
+static void test_tsa_host_safe_args(void)
+{
+    uint8_t digest[32] = {1}, nonce[8] = {1, 2, 3, 4, 5, 6, 7, 8}, req[128], resp[4096];
+    size_t rl, n;
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_build_request(digest, nonce, NULL, req, sizeof(req), &rl));
+    asics_tsa_host_set_hook(NULL, NULL);
+    const char *marker = "/tmp/asics_tsa_injected";
+    remove(marker);
+    asics_tsa_host_set_section("tsa_good; touch /tmp/asics_tsa_injected #");
+    TEST_ASSERT_EQUAL(ESP_OK, asics_tsa_transport(req, rl, resp, sizeof(resp), &n));   /* Standard-Sektion */
+    FILE *f = fopen(marker, "r");
+    TEST_ASSERT_NULL(f);
+    asics_tsa_host_set_section("gibt_es_nicht");                                        /* gueltiger Name, Sektion fehlt */
+    TEST_ASSERT_EQUAL(ASICS_ERR_TSA_UNAVAILABLE, asics_tsa_transport(req, rl, resp, sizeof(resp), &n));
+    asics_tsa_host_set_section("tsa_good");
+}
+
 void run_tsa_tests(void)
 {
     RUN_TEST(test_tsa_request_vectors);
     RUN_TEST(test_tsa_request_errors);
     RUN_TEST(test_tsa_host_transport);
+    RUN_TEST(test_tsa_host_safe_args);
     RUN_TEST(test_tsa_resp_good);
     RUN_TEST(test_tsa_resp_bad_structure);
     RUN_TEST(test_tsa_generalized_time);

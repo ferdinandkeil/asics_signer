@@ -3,9 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 /* Host-Transport: Test-TSA ueber das openssl-Kommandozeilenwerkzeug. */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "tsa_host.h"
 #include "asics_signer.h"
@@ -24,7 +29,36 @@ void asics_tsa_host_set_hook(asics_tsa_host_hook_t hook, void *ctx)
 
 void asics_tsa_host_set_section(const char *section)
 {
-    snprintf(s_section, sizeof(s_section), "%s", section ? section : "tsa_good");
+    /* nur [A-Za-z0-9_]: der Name geht als Argument an openssl (kein Shell-Kommando) */
+    bool ok = section && section[0] && strlen(section) < sizeof(s_section);
+    for (const char *c = section; ok && *c; c++) {
+        ok = isalnum((unsigned char)*c) || *c == '_';
+    }
+    snprintf(s_section, sizeof(s_section), "%s", ok ? section : "tsa_good");
+}
+
+/* openssl mit Argumentvektor starten (fork/execvp, keine Shell); stderr nach /dev/null */
+static bool run_openssl(char *const argv[])
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        return false;
+    }
+    if (pid == 0) {
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) {
+            dup2(dn, STDERR_FILENO);
+            dup2(dn, STDOUT_FILENO);
+        }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int status;
+    pid_t w;
+    do { /* die FreeRTOS-Linux-Portierung unterbricht mit Tick-Signalen */
+        w = waitpid(pid, &status, 0);
+    } while (w < 0 && errno == EINTR);
+    return w == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 esp_err_t asics_tsa_host_openssl(const uint8_t *req, size_t req_len, uint8_t *resp, size_t resp_size, size_t *resp_len)
@@ -38,7 +72,7 @@ esp_err_t asics_tsa_host_openssl(const uint8_t *req, size_t req_len, uint8_t *re
     if (!mkdtemp(dir)) {
         return ASICS_ERR_TSA_UNAVAILABLE;
     }
-    char qpath[256], rpath[256], cmd[1024];
+    char qpath[256], rpath[256], cfg[512];
     snprintf(qpath, sizeof(qpath), "%s/req.tsq", dir);
     snprintf(rpath, sizeof(rpath), "%s/resp.tsr", dir);
     esp_err_t err = ASICS_ERR_TSA_UNAVAILABLE;
@@ -46,9 +80,10 @@ esp_err_t asics_tsa_host_openssl(const uint8_t *req, size_t req_len, uint8_t *re
     if (f) {
         fwrite(req, 1, req_len, f);
         fclose(f);
-        snprintf(cmd, sizeof(cmd), "openssl ts -reply -config '%s/tsa.cnf' -section %s -queryfile '%s' -out '%s' 2>/dev/null",
-                 pki, s_section, qpath, rpath);
-        if (system(cmd) == 0 && (f = fopen(rpath, "rb")) != NULL) {
+        snprintf(cfg, sizeof(cfg), "%s/tsa.cnf", pki);
+        char *const argv[] = {"openssl", "ts", "-reply", "-config", cfg, "-section", s_section,
+                              "-queryfile", qpath, "-out", rpath, NULL};
+        if (run_openssl(argv) && (f = fopen(rpath, "rb")) != NULL) {
             size_t n = fread(resp, 1, resp_size, f);
             int more = fgetc(f);
             fclose(f);
