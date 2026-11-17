@@ -137,6 +137,8 @@ static void test_zip_dos_time(void)
     TEST_ASSERT_EQUAL_HEX16(0x0021, d);
     TEST_ASSERT_EQUAL(0, t);
     TEST_ASSERT_NOT_EQUAL(ESP_OK, zip_dos_time(0, &t, &d));
+    TEST_ASSERT_EQUAL(ESP_OK, zip_dos_time((time_t)4354819199LL, &t, &d));      /* 2107-12-31 23:59:59 */
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, zip_dos_time((time_t)4354819200LL, &t, &d));  /* 2108-01-01 */
 }
 
 void run_zip_tests(void)

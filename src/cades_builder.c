@@ -53,7 +53,7 @@ static esp_err_t format_time(time_t t, char *buf, size_t *len, uint8_t *tag)
         return ESP_ERR_INVALID_ARG;
     }
     int y = tm.tm_year + 1900;
-    if (y < 1950) {
+    if (y < 1950 || y > 9999) { /* UTCTime/GeneralizedTime: 4-stelliges Jahr */
         return ESP_ERR_INVALID_ARG;
     }
     int n;
@@ -65,6 +65,9 @@ static esp_err_t format_time(time_t t, char *buf, size_t *len, uint8_t *tag)
         n = snprintf(buf, 20, "%04d%02d%02d%02d%02d%02dZ", y, tm.tm_mon + 1, tm.tm_mday,
                      tm.tm_hour, tm.tm_min, tm.tm_sec);
         *tag = MBEDTLS_ASN1_GENERALIZED_TIME;
+    }
+    if (n < 0 || n >= 20) { /* abgeschnitten */
+        return ESP_ERR_INVALID_ARG;
     }
     *len = (size_t)n;
     return ESP_OK;

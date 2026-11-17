@@ -82,7 +82,8 @@ asics_state_t asics_signer_get_state(void);
  * Vor dem Signieren wird die Gueltigkeit (notBefore/notAfter) des Geraetezertifikats
  * gegen die aktuelle Zeit geprueft.
  *
- * @return ESP_OK; ESP_ERR_INVALID_STATE (nicht provisioniert / Uhrzeit < Mindestzeit);
+ * @return ESP_OK; ESP_ERR_INVALID_STATE (nicht provisioniert / Uhrzeit < Mindestzeit /
+ *         Uhrzeit nach 2107, ausserhalb des ZIP-DOS-Zeitbereichs 1980..2107);
  *         ASICS_ERR_SIGNER_CERT_VALIDITY (Geraetezertifikat nicht gueltig);
  *         ESP_ERR_INVALID_ARG; ESP_ERR_NO_MEM; oder der Fehler des Callbacks.
  */

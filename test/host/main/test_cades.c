@@ -202,6 +202,21 @@ static void test_cades_time_encoding(void)
     TEST_ASSERT_TRUE(found);
 }
 
+static void test_cades_time_range(void)
+{
+    size_t dl, cl, n;
+    uint8_t *dev = test_pem_to_der("dev.pem", &dl), *ca = test_pem_to_der("ca.pem", &cl);
+    asics_der_t cad = {ca, cl};
+    cades_params_t p = {.dev_cert = dev, .dev_cert_len = dl, .ca_certs = &cad, .ca_count = 1, .sign = stub_sign};
+    p.signing_time = (time_t)253402300799LL;   /* 9999-12-31 23:59:59: noch darstellbar */
+    TEST_ASSERT_EQUAL(ESP_OK, cades_build(&p, cms, sizeof(cms), &n));
+    p.signing_time = (time_t)253402300800LL;   /* Jahr 10000: kein abgeschnittener String, sondern Fehler */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, cades_build(&p, cms, sizeof(cms), &n));
+    p.signing_time = (time_t)-2208988800LL;    /* 1900 */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, cades_build(&p, cms, sizeof(cms), &n));
+    free(dev); free(ca);
+}
+
 static void test_cades_unsigned_hook(void)
 {
     size_t n0 = build(TEST_TIME, false);
@@ -306,6 +321,7 @@ void run_cades_tests(void)
 {
     RUN_TEST(test_cades_structure_and_determinism);
     RUN_TEST(test_cades_time_encoding);
+    RUN_TEST(test_cades_time_range);
     RUN_TEST(test_cades_unsigned_hook);
     RUN_TEST(test_cades_buffer_too_small);
     RUN_TEST(test_e2e_sign_and_verify);

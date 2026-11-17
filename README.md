@@ -39,7 +39,7 @@ The container is a ZIP archive with exactly three entries, in this order:
 
 All entries are uncompressed. Sizes and CRC32 are known before each local header is written, so
 no data descriptors and no ZIP64 records are used. CRC32 comes from the ROM (`esp_rom_crc32_le`).
-The DOS timestamp of all entries equals the signing time.
+The DOS timestamp of all entries equals the signing time. It can only represent 1980..2107; `asics_sign()` therefore refuses to sign (`ESP_ERR_INVALID_STATE`) when the clock is after 2107.
 
 ## Signature profile
 
@@ -187,7 +187,7 @@ Return values of `asics_sign()`:
 | Code | Meaning |
 |------|---------|
 | `ESP_OK` | container written |
-| `ESP_ERR_INVALID_STATE` | not provisioned, or clock below `CONFIG_ASICS_MIN_TIME` |
+| `ESP_ERR_INVALID_STATE` | not provisioned, clock below `CONFIG_ASICS_MIN_TIME`, or clock after 2107 |
 | `ASICS_ERR_SIGNER_CERT_VALIDITY` | device certificate not yet valid or expired |
 | `ESP_ERR_INVALID_ARG` | invalid name, data or callback |
 | `ESP_ERR_NO_MEM` | buffer allocation failed |

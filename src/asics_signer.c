@@ -12,6 +12,7 @@
 #include "cert_store.h"
 #include "kv_store.h"
 #include "time_source.h"
+#include "zip_writer.h"
 #include "backend/key_backend.h"
 #include "esp_log.h"
 #include "mbedtls/sha256.h"
@@ -81,6 +82,12 @@ esp_err_t asics_sign(const char *payload_name, const uint8_t *data, size_t len,
     esp_err_t err = asics_time_get(&now);
     if (err != ESP_OK) {
         return err; /* ESP_ERR_INVALID_STATE: Uhr unter Mindestzeit, keine Signatur */
+    }
+    uint16_t dos_t, dos_d;
+    if (zip_dos_time(now, &dos_t, &dos_d) != ESP_OK) {
+        /* Zeit ausserhalb des ZIP-DOS-Bereichs (1980..2107): im Container nicht darstellbar */
+        ESP_LOGE(TAG, "Signierzeit ausserhalb 1980..2107 - keine Signatur");
+        return ESP_ERR_INVALID_STATE;
     }
 
     uint8_t *mem = malloc(ASICS_CERT_BLOB_MAX + CONFIG_ASICS_CMS_BUF_SIZE);

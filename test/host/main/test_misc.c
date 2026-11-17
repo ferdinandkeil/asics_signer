@@ -43,6 +43,19 @@ static void test_time_check(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, asics_time_get(&t));
 }
 
+/* Signierzeit nach 2107 passt nicht in den ZIP-DOS-Zeitstempel: vor dem Signieren abgelehnt */
+static void test_sign_time_range(void)
+{
+    setup();
+    test_load_certs("dev.pem", "ca.pem");
+    int calls = 0;
+    g_now = (time_t)4354819200LL;                    /* 2108-01-01 */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+    g_now = (time_t)253402300800LL;                  /* Jahr 10000 */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, asics_sign("a.csv", (const uint8_t *)"x", 1, never, &calls));
+    TEST_ASSERT_EQUAL(0, calls);
+}
+
 static void test_state_machine(void)
 {
     g_now = TEST_TIME;
@@ -304,6 +317,7 @@ static void test_sign_args(void)
 void run_misc_tests(void)
 {
     RUN_TEST(test_time_check);
+    RUN_TEST(test_sign_time_range);
     RUN_TEST(test_state_machine);
     RUN_TEST(test_import_checks);
     RUN_TEST(test_import_without_clock);
